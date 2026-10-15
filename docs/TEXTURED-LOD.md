@@ -179,3 +179,26 @@ changes, hourly boundaries and one-week timestamps. `-Legacy` requires the old
 GPU output readback test. `-Dgysf.smoke.waterDomainMotion=true` extends the full
 motion route across positive/negative 4096-block regions and asserts observed
 terrain origins, not just issued teleport commands. Use it with `motion=true`.
+
+`-Dgysf.smoke.cleanWater=true` uses the separate `gysf-clean-water-26.3` save,
+forbids topology/material fixtures, verifies air above the complete pool through
+Y=143, freezes the isolated server at tick 850, disables clouds and uses manual
+EV 0. Clean `waterMatrix` skips resource reload and keeps forced chunks until
+its final captures; it is an image control, not the lifecycle run.
+Use `waterNearReference=true` for the 129/129 near-ready pool-lane reference.
+`cleanWater`, `waterCompareOnly` and `waterSequence` together sample animated
+underwater images at client ticks 1320..1560, skipping repeated render-frame
+identifiers. The CSV records request time, camera, wave tuning and ownership.
+Screenshot readback/PNG encoding affects throughput; this is not a performance
+benchmark or a capture of every rendered frame.
+`scripts/Analyze-WaterCaptures.py <directory> --sequence --output <json>` checks
+metadata and describes fixed PNG regions. Add `--near-reference` for the near
+run and `--video <mp4>` for an FFmpeg convenience preview. Raw PNG/CSV files are
+the measurement sources; previews are lossy and are not timing evidence.
+
+`scripts/Test-WaterGrazing.ps1` is a deliberately separate diagnostic of an
+unresolved production limitation: the current three-step solver fails its
+0.001-block residual gate. Its non-zero exit must not be counted as passing
+acceptance. `-Prototype` evaluates a shaderTest-only conservative solver; its
+residual/limited nearest-root checks do not qualify it for production or prove
+its GPU cost. See the validation record before interpreting either result.

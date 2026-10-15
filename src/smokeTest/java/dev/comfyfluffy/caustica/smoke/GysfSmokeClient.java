@@ -18,13 +18,14 @@ import java.nio.file.*;
 
 /** Automatic Vulkan scene check in an isolated development world. */
 public final class GysfSmokeClient implements ClientModInitializer {
-    private static final String WORLD="gysf-26.3-smoke";
+    private static final boolean CLEAN_WATER=Boolean.getBoolean("gysf.smoke.cleanWater");
+    private static final String WORLD=CLEAN_WATER?"gysf-clean-water-26.3":"gysf-26.3-smoke";
     private static final boolean TEXTURE_FIXTURE=Boolean.getBoolean("gysf.smoke.textureFixture");
     private static final boolean WATER_MATRIX=Boolean.getBoolean("gysf.smoke.waterMatrix");
     private static final boolean WATER_COMPARE=Boolean.getBoolean("gysf.smoke.waterCompareOnly");
     private static final boolean WATER_NEAR_REFERENCE=Boolean.getBoolean("gysf.smoke.waterNearReference");
     private static final boolean STATIC_WATER=WATER_MATRIX || WATER_COMPARE || Boolean.getBoolean("gysf.smoke.staticWaterFixture");
-    private static final boolean WATER_FIXTURE=WATER_MATRIX || WATER_COMPARE || Boolean.getBoolean("gysf.smoke.waterFixture");
+    private static final boolean WATER_FIXTURE=CLEAN_WATER || WATER_MATRIX || WATER_COMPARE || Boolean.getBoolean("gysf.smoke.waterFixture");
     private static final boolean MOTION=Boolean.getBoolean("gysf.smoke.motion");
     private static final boolean WATER_DOMAIN_MOTION=Boolean.getBoolean("gysf.smoke.waterDomainMotion");
     private static final boolean MEMORY_PRESSURE=Boolean.getBoolean("gysf.smoke.memoryPressure");
@@ -50,7 +51,14 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private java.util.concurrent.CompletableFuture<?> fluidTopologyReady;
     private java.util.concurrent.CompletableFuture<?> fluidTopologyEditReady;
     private java.util.concurrent.CompletableFuture<?> fluidTopologyRestoreReady;
-    @Override public void onInitializeClient() { ClientTickEvents.END_CLIENT_TICK.register(this::tick); }
+    private final WaterSequenceCapture waterSequence=new WaterSequenceCapture();
+    @Override public void onInitializeClient() {
+        if(CLEAN_WATER && (FLUID_TOPOLOGY || FLUID_TOPOLOGY_EDITS || TEXTURE_FIXTURE))
+            throw new IllegalStateException("Clean-water world cannot contain topology or material fixtures");
+        if(WaterSequenceCapture.ENABLED && (!CLEAN_WATER || !WATER_COMPARE || WATER_MATRIX || requestedWaveSpeed()<=0))
+            throw new IllegalStateException("Animated water sequence needs clean comparison mode and positive speed");
+        ClientTickEvents.END_CLIENT_TICK.register(this::tick);
+    }
     private void tick(Minecraft client) {
         ticks++;
         if (finished) { if (++exitTicks>40) client.stop(); return; }
@@ -108,6 +116,12 @@ public final class GysfSmokeClient implements ClientModInitializer {
         }
         if (worldTicks==80) { client.player.connection.sendCommand("gamemode spectator"); client.player.connection.sendCommand("tp @s 0 140 0 0 20"); client.player.connection.sendCommand("time set noon"); }
         if (worldTicks==80 && STATIC_WATER) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(0f);
+        if (worldTicks==80 && CLEAN_WATER) {
+            CausticaConfig.Rt.Composite.CLOUDS.set(false);
+            CausticaConfig.Rt.Exposure.MODE.set("manual");
+            CausticaConfig.Rt.Exposure.MANUAL_EV.set(0f);
+            System.out.println("GYSF_CLEAN_WATER: manual EV=0, clouds off, topology/material fixtures forbidden");
+        }
         if(worldTicks==80 && (System.getProperty("gysf.smoke.waveStrength")!=null || System.getProperty("gysf.smoke.waveSpeed")!=null)) {
             float strength=Float.parseFloat(System.getProperty("gysf.smoke.waveStrength","1.0"));
             if(!Float.isFinite(strength) || strength<0 || strength>4) throw new IllegalStateException("Invalid smoke wave strength");
@@ -144,6 +158,8 @@ public final class GysfSmokeClient implements ClientModInitializer {
                     "fill 48 109 16 79 111 144 minecraft:water[level=0]"};
             for(String command:commands) client.player.connection.sendCommand(command);
             System.out.println("GYSF_SMOKE: placed isolated water fixture across 16-block section boundaries");
+            if(CLEAN_WATER) for(int y=112;y<=143;y+=7)
+                client.player.connection.sendCommand("fill 47 "+y+" 15 80 "+Math.min(y+6,143)+" 145 minecraft:air");
         }
         if (worldTicks==500) {
             client.player.connection.sendCommand(WATER_FIXTURE ? "tp @s 64 140 0 0 16" : TEXTURE_FIXTURE ? "tp @s 0 140 0 0 16" : "tp @s 0 140 0 0 20");
@@ -167,12 +183,15 @@ public final class GysfSmokeClient implements ClientModInitializer {
                     if(!level.getFluidState(new net.minecraft.core.BlockPos(64,110,z)).is(net.minecraft.tags.FluidTags.WATER)
                             || !level.getBlockState(new net.minecraft.core.BlockPos(64,108,z)).is(net.minecraft.world.level.block.Blocks.QUARTZ_BLOCK)) return false;
                 }
+                if(CLEAN_WATER) for(int x=47;x<=80;x++) for(int z=15;z<=145;z++) for(int y=112;y<=143;y++)
+                    if(!level.getBlockState(new net.minecraft.core.BlockPos(x,y,z)).isAir()) return false;
                 return true;
             });
         }
         if (worldTicks==890 && WATER_FIXTURE) {
             if(waterFixtureReady==null || !waterFixtureReady.isDone() || !waterFixtureReady.join())
                 throw new IllegalStateException("Water fixture blocks were not placed across the complete test lane");
+            if(CLEAN_WATER) System.out.println("GYSF_CLEAN_WATER: verified air above pool through Y=143; isolated server frozen");
             boolean near=dev.comfyfluffy.caustica.rt.terrain.RtTerrain.isSectionReady(new net.minecraft.core.BlockPos(64,110,32));
             boolean far=dev.comfyfluffy.caustica.rt.terrain.RtTerrain.isSectionReady(new net.minecraft.core.BlockPos(64,110,128));
             if(!near || far!=WATER_NEAR_REFERENCE) throw new IllegalStateException("Unexpected water near/LOD ownership: "+near+"/"+far+", reference="+WATER_NEAR_REFERENCE);
@@ -188,6 +207,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
                 dev.comfyfluffy.caustica.rt.terrain.FluidTopologySmokeProbe.verify(client,Boolean.getBoolean("gysf.smoke.topologyAllowMismatch"));
             }
         }
+        if(CLEAN_WATER && worldTicks==850) client.getSingleplayerServer().submit(()->client.getSingleplayerServer().tickRateManager().setFrozen(true));
         if (worldTicks==900) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                 image->{try {Files.createDirectories(Path.of("screenshots"));image.writeToFile(Path.of("screenshots","gysf-joint.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
         if(worldTicks==950 && FLUID_TOPOLOGY_EDITS) {
@@ -213,7 +233,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
         if (VISUAL_CONTROL && worldTicks==950) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                 image->{try {image.writeToFile(Path.of("screenshots","gysf-no-textured-control.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
         if (VISUAL_CONTROL && worldTicks==980) System.clearProperty("gysf.voxy.hideTextured");
-        if (worldTicks==1000 && !WATER_COMPARE) reload=client.reloadResourcePacks();
+        if (worldTicks==1000 && !WATER_COMPARE && !(CLEAN_WATER && WATER_MATRIX)) reload=client.reloadResourcePacks();
         if (WATER_FIXTURE && worldTicks==1100) {
             client.player.connection.sendCommand("tp @s 64 110 32 0 -2");
             client.options.fov().set(70);
@@ -240,7 +260,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
             if(worldTicks==1680) waterCapture(client,"raw-two");
             if(worldTicks==1685) { CausticaConfig.Rt.Composite.DENOISER.set(true); CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(requestedWaveSpeed()); }
         }
-        if (WATER_FIXTURE && worldTicks==(FLUID_TOPOLOGY_EDITS?1540:1280)) client.player.connection.sendCommand("forceload remove 32 0 96 160");
+        if (WATER_FIXTURE && worldTicks==(WaterSequenceCapture.ENABLED?1570:CLEAN_WATER && WATER_MATRIX?1710:FLUID_TOPOLOGY_EDITS?1540:1280)) client.player.connection.sendCommand("forceload remove 32 0 96 160");
         if(FLUID_TOPOLOGY && worldTicks==(FLUID_TOPOLOGY_EDITS?1540:1280)) client.getSingleplayerServer().submit(()->client.getSingleplayerServer().tickRateManager().setFrozen(false));
         if (STATIC_WATER && !WATER_MATRIX && worldTicks==1280) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(requestedWaveSpeed());
         if (!WATER_MATRIX && !WATER_COMPARE && worldTicks==1350) client.player.connection.sendCommand("execute in minecraft:the_nether run tp @s 0 90 0");
@@ -256,8 +276,10 @@ public final class GysfSmokeClient implements ClientModInitializer {
         if (MOTION && worldTicks==2300) client.player.connection.sendCommand("tp @s 0 140 0 0 16");
         if (MOTION && worldTicks==2800) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                 image->{try {image.writeToFile(Path.of("screenshots","gysf-motion-return.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
-        if (worldTicks==(WATER_COMPARE?(FLUID_TOPOLOGY_EDITS?1550:1290):WATER_MATRIX?1720:VISUAL_ONLY?990:MOTION?2900:2200)) {
-            if(!VISUAL_ONLY && !WATER_COMPARE) {
+        waterSequence.sample(client,worldTicks);
+        if (worldTicks==(WATER_COMPARE?(FLUID_TOPOLOGY_EDITS?1550:WaterSequenceCapture.ENABLED?1580:1290):WATER_MATRIX?1720:VISUAL_ONLY?990:MOTION?2900:2200)) {
+            waterSequence.verify();
+            if(!VISUAL_ONLY && !WATER_COMPARE && !(CLEAN_WATER && WATER_MATRIX)) {
                 if (reload==null || !reload.isDone()) throw new IllegalStateException("Resource reload incomplete");
                 reload.join();
                 if (!WATER_MATRIX && (!visitedNether || !returnedOverworld)) throw new IllegalStateException("Dimension round trip incomplete");
@@ -266,7 +288,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
             if(System.getProperty("gysf.smoke.waveStrength")!=null && (!CausticaConfig.Rt.Composite.WATER_WAVES.value()
                     || CausticaConfig.Rt.Composite.WATER_WAVE_STRENGTH.value()!=Float.parseFloat(System.getProperty("gysf.smoke.waveStrength"))))
                 throw new IllegalStateException("Requested smoke wave strength was not retained");
-            if(System.getProperty("gysf.smoke.waveSpeed")!=null && !WATER_COMPARE
+            if(System.getProperty("gysf.smoke.waveSpeed")!=null && (!WATER_COMPARE || WaterSequenceCapture.ENABLED)
                     && (!CausticaConfig.Rt.Composite.WATER_WAVES.value()
                     || CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.value()!=requestedWaveSpeed()))
                 throw new IllegalStateException("Requested smoke wave speed was not retained");
@@ -307,6 +329,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
                     +" recoveredBeforeReload="+observedBudgetRecovery+" driverBudget="+sawDriverBudget
                     +" pressureFallbackFrames="+pressureFallbackFrames+" reducedProvider="+observedReducedProvider);
             finished=true;
+            if(CLEAN_WATER) client.getSingleplayerServer().submit(()->client.getSingleplayerServer().tickRateManager().setFrozen(false));
             client.disconnectWithSavingScreen();
         }
     }

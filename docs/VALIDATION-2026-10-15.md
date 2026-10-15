@@ -890,3 +890,85 @@ belong to the host probe. Suspended topology fixtures affect these still images,
 which are not a clean-pool dark-band or continuous-frame temporal comparison.
 Exact shoreline clipping, arbitrary grazing proxy intersections and full visual/
 performance qualification remain open. PCL files and player saves are untouched.
+
+## Clean-pool image controls and unresolved grazing intersections
+
+Production remains gysf 0.6.2 (`99b00b24`, JAR SHA-256
+`88BAB243585A07D0790FED314C8F2F7BBEF2357C3AC4C69150821697EDCE4FFF`)
+with the same pinned provider. This milestone changes smoke/analysis tools,
+not production shading or the released development pair.
+
+The separate `gysf-clean-water-26.3` save rejects topology/material fixtures.
+Five bounded air-fill commands clear the volume above the quartz pool; an
+off-render-thread server check verifies every block in X=47..80, Z=15..145,
+Y=112..143 is air. The server is frozen at client tick 850, clouds are disabled
+and exposure is manual EV 0. Clean image modes skip resource reload and
+dimension changes; those remain covered by the separate lifecycle runs.
+
+The static matrix holds wave speed zero and height one. Mixed ownership has
+64/129 near-ready centre-line samples; the reference has all 129/129 near-ready.
+Controls hide textured LOD, disable waves, increase bounce cap to eight and
+disable denoising at caps eight/two. The two PNG regions are roof
+(32,80)..(821,243) and the original band (520,120)..(853,244), excluding HUD/chat.
+Every matrix image has zero pixels with all RGB channels below 20 in both
+regions. The mixed and near runs complete 3645 / 3774 RT frames, respectively,
+with clean Vulkan validation, no allocation deferrals and zero native LOD bytes
+at shutdown. Peak native LOD allocations are 100466176 / 294960304 bytes.
+
+This supports removal of the original dark-band failure in the specified clean,
+frozen scene. It is not a universal image-quality score: hidden-LOD controls
+deliberately remove geometry, references can have different surrounding cached
+terrain/lighting, and raw/denoised images use different reconstruction paths.
+
+The animated comparison mode keeps height/speed at one and four bounces. It
+samples every client tick from 1320 through 1560, skipping repeated render-frame
+identifiers. Metadata verifies a fixed camera at (64.5,110,32.5), near sample
+ready, and far sample LOD-owned / near-owned as appropriate. Every requested
+capture completes and each PNG hash is distinct.
+
+| Animated clean-pool observations | Mixed | Full-near reference |
+| --- | ---: | ---: |
+| PNG samples / repeated render identifiers skipped | 226 / 15 | 159 / 82 |
+| Request span, seconds | 12.0313437 | 12.0330896 |
+| RT frames in complete run | 3508 | 3229 |
+| Maximum original-band near-black pixels | 0 | 0 |
+| Maximum larger-roof near-black pixels | 45 | 0 |
+| Native LOD peak / shutdown bytes | 306379920 / 0 | 307933040 / 0 |
+
+Both runs pass Vulkan validation and retain the requested ownership with no
+memory deferrals. The 45 roof pixels occur in a short dark feature near the
+left pool boundary. They are not evidence of an LOD cause: these runs have
+different animation phases, stochastic histories and surrounding cache state.
+The CSV records request times/frame identifiers, not exact GPU readback fences.
+Readback, PNG encoding, RD4/RD12 and validation affect sample cadence; these
+counts are not render-performance results. The MP4 previews hold sampled images
+for approximate request intervals and are lossy. Pixel metrics use original
+PNGs only. Raw records/previews are in `artifacts/2026-10-15/clean-water/`.
+
+The image work prompted a wider mathematical diagnostic of the displacement
+proxy. `Test-WaterGrazing.ps1` executes the production evaluator on the Slang
+C++ host backend: flat top/underside normals, strengths 1/4, eight phases,
+four positions, footprints 0/0.5/2/8, and ray angles 0.25/0.5/1/2/4/8/15/30
+degrees above the rest plane. Of 4096 cases, 2104 exceed the existing
+0.001-block surface-residual tolerance. Maximum residual is 3.51764 blocks
+(strength 4, angle 8 degrees, time 1.37). The three unguarded Newton steps and
+the grazing search bound are insufficient. This diagnostic intentionally exits
+non-zero and is separate from the ordinary Gradle check. Earlier moderate-angle
+surface checks did not prove this wider requirement.
+
+A conservative forward-marching candidate lives only in `src/shaderTest/`.
+It uses actual LOD-filtered height envelopes, a plane-relative residual and a
+directional second-derivative bound. All 4096 residual cases pass: maximum
+residual 0.000074625 blocks, no exhausted 512-step walks, mean 21.0862 / maximum
+232 march field evaluations. Thirty-two selected rays are also compared with dense
+0.01/0.005-block sign-change searches followed by bisection; the two references
+agree within 0.001 and maximum candidate/reference ray-distance difference is
+0.0000958443 blocks, below the 0.02 gate.
+
+These are bounded numerical references, not a proof for every tangent/multiple
+root or a GPU performance measurement. The candidate is not imported by
+production shaders or included in the JAR. Before integration it needs broader
+closest-root and finite-water-domain/shoreline checks plus measured GPU cost.
+The current production grazing limitation remains open; do not interpret the
+candidate's passing diagnostic or the image runs as its repair. No PCL files,
+player saves or native production artifacts were changed.

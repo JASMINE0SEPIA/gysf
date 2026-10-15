@@ -114,6 +114,17 @@ unchanged. Host numerical checks include world-border coordinates, clock/base
 transitions and one-week timestamps. These are separate from GPU pixel/readback
 and continuous-frame image acceptance; shoreline clipping remains open.
 
+Clean-pool controls now separate water images from suspended topology fixtures.
+Static mixed/full-near matrices and short animated sequences have been captured
+with stable pool ownership. They do not establish general temporal fidelity.
+A new 4096-case grazing diagnostic exposes an unresolved production defect:
+the three-step Newton solver can leave the displaced hit off its own height
+field (2104 residual failures). The shaderTest-only conservative candidate
+passes these cases and 32 dense nearest-root references, but its work peaks at
+232 field evaluations. It is not used by the renderer. Establish broader
+nearest-root/shore-domain correctness and GPU cost before integration; the
+ordinary Gradle check does not include this known-failing manual diagnostic.
+
 The external provider starts with a 1024-block selection cap; the smoke run uses
 512 blocks. `-Dvoxy.external.maxDistanceBlocks=<512..10000>` selects a development
 limit without changing the user's stored Voxy distance. Per-sprite PBR, LOD emitter sampling,
