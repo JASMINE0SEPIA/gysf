@@ -271,3 +271,76 @@ working-set peaks and frame counts are not a controlled performance comparison.
 The final paired JARs, hashes, screenshots and raw records remain in ignored
 `artifacts/2026-10-15/memory/`. The production JARs exclude the smoke mod. No PCL
 mods, configuration or player saves are changed by these runs.
+
+## Water tint and near-terrain ownership: 0.3.1
+
+gysf 0.3.1 uses the paired provider `20c82bde` without a provider API change.
+The near-ready probe now follows the represented voxel's inward face axis,
+rather than the incoming ray direction. Voxy's sloped fluid normal remains a
+shading normal; its packed face determines ownership. Hit positions and the
+readiness mask share the terrain rebase.
+
+Water tint is now normalized biome colour, matching the near fluid mesher's
+optical input. Ordinary block albedo stays linear. The baked water sprite no
+longer multiplies colour or masks water coverage, including shadow tint.
+Outward LOD water crossings use the existing dielectric exit handler, while
+entering crossings retain the glossy approximation and cannot push a new
+absorbing medium from sparse LOD data. This is deliberately asymmetric.
+
+All 157 gysf tests pass, including golden biome-colour packing values and the
+separation of sloped fluid normals from packed voxel faces. Shader/SPIR-V,
+Minecraft ABI and production JAR checks pass. The unchanged provider's 25 tests
+were last checked in the preceding memory-budget validation; they are not a new
+provider test run for this change.
+
+The water fixture is a 32-block-wide quartz-bottomed pool across z=16..144.
+Server-side checks verify water and floor along its entire centre line. At the
+above-water camera, (64,110,32) is near-ready and (64,110,128) is not. The harness
+also requires converted textured water, records a hidden-LOD control at the same
+camera, and verifies that the later camera's eyes are underwater. Its temporary
+forced chunks are removed before the dimension round trip.
+
+An initial setup run failed because fill commands extended into unloaded
+chunks; the underwater-camera assertion rejected that incomplete fixture. It
+is retained locally as `smoke-incomplete-fixture.log`, not counted as a GPU
+pass. Temporary test-world chunk loading and the complete-lane assertion fix
+the fixture. No PCL world is involved.
+
+The tint-only intermediate build completes 5981 RT frames, with native LOD
+allocation peak 231086272 bytes and zero accounted bytes at shutdown. The final
+exit-enabled build completes the same full 2900-tick route:
+
+| Final water run | Result |
+| --- | ---: |
+| RT frames | 6939 |
+| Peak selected source meshes / resident RT BLAS sections | 1036 / 725 |
+| Converted textured batches | 2770 |
+| Replacement groups / validated partitions | 1172 / 168 |
+| Converted water quads, cumulative across rebuilds | 894512 |
+| Peak accounted native LOD allocation bytes | 236665632 |
+| Native LOD allocation bytes at shutdown | 0 |
+| Memory deferrals / distance reductions | 0 / 0 |
+
+The final run completes reload, Nether/Overworld return, variable-height travel,
+teleport, manual RT refresh, save and shutdown. Real driver-budget reporting is
+active. Neither complete run reports a Vulkan VUID, synchronization hazard,
+device loss, provider/compositor failure or coverage assertion. OMM remains off
+for the installed SDK checker issue. These frame and working-set counts are
+activity evidence, not a controlled performance comparison.
+
+![Water with near and far terrain](images/water-lod-above.png)
+![Same camera with textured LOD hidden](images/water-lod-hidden.png)
+![Underwater view](images/water-lod-underwater.png)
+
+The hidden control confirms that the far pool and cached terrain are supplied
+by textured LOD. The above-water view contains reflected sky and pool geometry;
+the underwater view retains a dark band near the surface in this 2-bounce
+setup. Its cause has not been isolated. These images do not establish a visual
+improvement from the exit path or a complete near/far water match. Incoming
+far-water transmission/absorption, waves, geometric quantization and the
+remaining dark band still require separate visual controls. The ownership and
+optical-input changes are narrower than seamless-water or performance acceptance.
+
+Raw records, intermediate/final screenshots and paired JARs stay in ignored
+`artifacts/2026-10-15/water/`. The production JAR excludes the smoke mod. PCL
+mods, settings and player saves remain untouched.

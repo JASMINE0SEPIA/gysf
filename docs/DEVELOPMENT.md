@@ -68,8 +68,12 @@ readiness, including empty replacements. The DH input retains its separate
 
 `-Dgysf.voxy.colourProxy=true` retains the older average-colour input for controlled
 comparisons. The textured path uses block-state material profiles, not full
-per-sprite LabPBR normal/specular maps. Distant water remains a thin glossy
-surface, rather than entering the path tracer's near-field water volume stack.
+per-sprite LabPBR normal/specular maps. Distant water retains a thin glossy
+approximation for entering rays; outward crossings can exit an existing water
+medium through the near-field dielectric handler.
+gysf 0.3.1 aligns its optical biome tint with near water and makes the near-ready
+ownership probe independent of ray direction, including sloped fluid triangles.
+Transmission, absorption and waves still differ for entering far-water hits.
 
 The external provider starts with a 1024-block selection cap; the smoke run uses
 512 blocks. `-Dvoxy.external.maxDistanceBlocks=<512..10000>` selects a development

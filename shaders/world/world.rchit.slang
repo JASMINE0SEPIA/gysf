@@ -513,9 +513,10 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
         uint dpid = PrimitiveIndex() + sec.triBase[GeometryIndex()];
         TerrainPrim dpr = ConstPtr<TerrainPrim>(sec.primAddr)[dpid];
         bool textured = (dpr.flags & PRIM_VOXY) != 0u;
+        uint dhSurface = uint(dpr.tint.w + 0.5);
         float4 voxySample = float4(1.0);
         float3 dhColour = dpr.tint.rgb;
-        if (textured) {
+        if (textured && dhSurface != DH_SURFACE_WATER) {
             uint slot = ConstPtr<WorldPush>(pc.worldPushAddr)[0].voxyTextureSlot;
             voxySample = voxyTexel(dpr, voxyUv(sec, dpid, float3(1.0-attribs.x-attribs.y, attribs)),
                     rayCone, RayTCurrent(), entityAlbedoTex[NonUniformResourceIndex(slot)]);
@@ -524,7 +525,6 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
         float3 sourceNormal = normalize(dpr.normal.xyz);
         float3 dn = sourceNormal;
         if (dot(dn, -WorldRayDirection()) < 0.0) dn = -dn;
-        uint dhSurface = uint(dpr.tint.w + 0.5);
         uint dhMaterial = textured ? ((dpr.flags & 64u) != 0u ? 1u : 0u) : dpr.flags;
         bool dhWater = dhSurface == DH_SURFACE_WATER;
         bool dhGlass = dhSurface == DH_SURFACE_GLASS;
@@ -554,17 +554,22 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
         }
 
         if (dhWater) {
-            // A coarse LOD voxel is a sparse surface approximation, not a watertight column: pushing a
-            // real water medium here would accumulate Beer-Lambert absorption through generated
-            // bottom/side faces and turn distant lakes into black sheets (the fork's voxy-compat bug).
-            // Our unified dielectric raygen derives the medium from the payload, so the safe adaptation
-            // is a glossy opaque water-tinted surface: correct colour and a plausible sun highlight at
-            // horizon distances, with zero medium-stack interaction.
             payload.albedo = half3(dhColour);
             payload.normal = half3(dn);
             payload.hitT = RayTCurrent();
             payload.motionPrev = half3(0.0h, 0.0h, 0.0h);
             payload.f0 = half3(0.02h, 0.02h, 0.02h);
+            // An outward crossing can close an existing near/camera water medium using the normal
+            // dielectric handler, including waves. It never pushes a new medium from sparse LOD data.
+            if (dot(WorldRayDirection(), sourceNormal) > 0.0) {
+                payloadSetPacked(payload, MATERIAL_WATER, dhHeader.params.x, 0.0, 0.0, 0.0,
+                        dhHeader.params.z, dhHeader.params.w, EMISSION_SOURCE_NONE);
+                payloadSetDielectric(payload, MATERIAL_WATER, false);
+                return;
+            }
+            // A coarse LOD voxel is not a watertight column. Entering rays retain a glossy surface
+            // approximation instead of accumulating volume absorption through generated side/bottom
+            // faces. Its optical biome tint must not be multiplied by the baked blue water sprite.
             payloadSetPacked(payload, MATERIAL_OPAQUE, 0.075, 0.0, 0.0, 0.0,
                     1.333, 0.0, EMISSION_SOURCE_NONE);
             return;

@@ -19,6 +19,7 @@ import java.nio.file.*;
 public final class GysfSmokeClient implements ClientModInitializer {
     private static final String WORLD="gysf-26.3-smoke";
     private static final boolean TEXTURE_FIXTURE=Boolean.getBoolean("gysf.smoke.textureFixture");
+    private static final boolean WATER_FIXTURE=Boolean.getBoolean("gysf.smoke.waterFixture");
     private static final boolean MOTION=Boolean.getBoolean("gysf.smoke.motion");
     private static final boolean MEMORY_PRESSURE=Boolean.getBoolean("gysf.smoke.memoryPressure");
     private static final boolean VISUAL_ONLY=TEXTURE_FIXTURE && Boolean.getBoolean("gysf.smoke.visualOnly");
@@ -36,6 +37,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private int pressureFallbackFrames;
     private boolean observedReducedProvider;
     private java.util.concurrent.CompletableFuture<Void> reload;
+    private java.util.concurrent.CompletableFuture<Boolean> waterFixtureReady;
     @Override public void onInitializeClient() { ClientTickEvents.END_CLIENT_TICK.register(this::tick); }
     private void tick(Minecraft client) {
         ticks++;
@@ -91,8 +93,11 @@ public final class GysfSmokeClient implements ClientModInitializer {
             observedReducedProvider|=VoxyCompat.renderDistanceChunks()*16<VoxyCompat.requestedDistanceBlocks();
         }
         if (worldTicks==80) { client.player.connection.sendCommand("gamemode spectator"); client.player.connection.sendCommand("tp @s 0 140 0 0 20"); client.player.connection.sendCommand("time set noon"); }
-        if (worldTicks==250) client.player.connection.sendCommand(TEXTURE_FIXTURE
-                ? "tp @s 0 140 128 180 20" : "tp @s 128 140 0 90 20");
+        if (worldTicks==250) {
+            if(WATER_FIXTURE) client.player.connection.sendCommand("forceload add 32 0 96 160");
+            client.player.connection.sendCommand(WATER_FIXTURE ? "tp @s 64 116 128 180 5" : TEXTURE_FIXTURE
+                    ? "tp @s 0 140 128 180 20" : "tp @s 128 140 0 90 20");
+        }
         if (worldTicks==300 && TEXTURE_FIXTURE) {
             String[] commands={
                     "fill -24 109 94 24 118 108 minecraft:air",
@@ -105,13 +110,45 @@ public final class GysfSmokeClient implements ClientModInitializer {
             for(String command:commands) client.player.connection.sendCommand(command);
             System.out.println("GYSF_SMOKE: placed isolated textured LOD fixture at z=100");
         }
+        if (worldTicks==300 && WATER_FIXTURE) {
+            String[] commands={
+                    "fill 48 112 16 79 118 144 minecraft:air",
+                    "fill 47 108 15 80 108 145 minecraft:quartz_block",
+                    "fill 47 109 15 47 111 145 minecraft:quartz_block",
+                    "fill 80 109 15 80 111 145 minecraft:quartz_block",
+                    "fill 48 109 15 79 111 15 minecraft:quartz_block",
+                    "fill 48 109 145 79 111 145 minecraft:quartz_block",
+                    "fill 48 109 16 79 111 144 minecraft:water[level=0]"};
+            for(String command:commands) client.player.connection.sendCommand(command);
+            System.out.println("GYSF_SMOKE: placed isolated water fixture across 16-block section boundaries");
+        }
         if (worldTicks==500) {
-            client.player.connection.sendCommand(TEXTURE_FIXTURE ? "tp @s 0 140 0 0 16" : "tp @s 0 140 0 0 20");
-            if(TEXTURE_FIXTURE) client.options.fov().set(30);
+            client.player.connection.sendCommand(WATER_FIXTURE ? "tp @s 64 116 0 0 5" : TEXTURE_FIXTURE ? "tp @s 0 140 0 0 16" : "tp @s 0 140 0 0 20");
+            if(TEXTURE_FIXTURE && !WATER_FIXTURE) client.options.fov().set(30);
         }
         if (worldTicks==890 && TEXTURE_FIXTURE) {
             System.out.println("GYSF_SMOKE: fixture near-ready="+
                     dev.comfyfluffy.caustica.rt.terrain.RtTerrain.isSectionReady(new net.minecraft.core.BlockPos(0,112,100)));
+        }
+        if (worldTicks==800 && WATER_FIXTURE) {
+            var server=client.getSingleplayerServer();
+            if(server==null) throw new IllegalStateException("Isolated integrated server missing");
+            waterFixtureReady=server.submit(()->{
+                var level=server.overworld();
+                for(int z=16;z<=144;z++) {
+                    if(!level.getFluidState(new net.minecraft.core.BlockPos(64,110,z)).is(net.minecraft.tags.FluidTags.WATER)
+                            || !level.getBlockState(new net.minecraft.core.BlockPos(64,108,z)).is(net.minecraft.world.level.block.Blocks.QUARTZ_BLOCK)) return false;
+                }
+                return true;
+            });
+        }
+        if (worldTicks==890 && WATER_FIXTURE) {
+            if(waterFixtureReady==null || !waterFixtureReady.isDone() || !waterFixtureReady.join())
+                throw new IllegalStateException("Water fixture blocks were not placed across the complete test lane");
+            boolean near=dev.comfyfluffy.caustica.rt.terrain.RtTerrain.isSectionReady(new net.minecraft.core.BlockPos(64,110,32));
+            boolean far=dev.comfyfluffy.caustica.rt.terrain.RtTerrain.isSectionReady(new net.minecraft.core.BlockPos(64,110,128));
+            if(!near || far) throw new IllegalStateException("Water fixture did not span near and LOD terrain: "+near+"/"+far);
+            System.out.println("GYSF_SMOKE: water near-ready="+near+" far-ready="+far);
         }
         if (worldTicks==900) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                 image->{try {Files.createDirectories(Path.of("screenshots"));image.writeToFile(Path.of("screenshots","gysf-joint.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
@@ -120,6 +157,14 @@ public final class GysfSmokeClient implements ClientModInitializer {
                 image->{try {image.writeToFile(Path.of("screenshots","gysf-no-textured-control.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
         if (VISUAL_CONTROL && worldTicks==980) System.clearProperty("gysf.voxy.hideTextured");
         if (worldTicks==1000) reload=client.reloadResourcePacks();
+        if (WATER_FIXTURE && worldTicks==1100) client.player.connection.sendCommand("tp @s 64 110 32 0 -2");
+        if (WATER_FIXTURE && worldTicks==1250) {
+            if(!client.player.isUnderWater()) throw new IllegalStateException("Underwater camera was not observed");
+            Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
+                    image->{try {image.writeToFile(Path.of("screenshots","gysf-water-underwater.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
+            System.out.println("GYSF_SMOKE: underwater water fixture captured");
+        }
+        if (WATER_FIXTURE && worldTicks==1280) client.player.connection.sendCommand("forceload remove 32 0 96 160");
         if (worldTicks==1350) client.player.connection.sendCommand("execute in minecraft:the_nether run tp @s 0 90 0");
         if (worldTicks==1650) client.player.connection.sendCommand("execute in minecraft:overworld run tp @s 0 140 0");
         if (MOTION && worldTicks>=1750 && worldTicks<=2050 && worldTicks%10==0) {
@@ -143,6 +188,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
             long textured=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.texturedBuildCount();
             long leafCutouts=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.leafCutoutQuadCount();
             var lod=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE;
+            if(WATER_FIXTURE && lod.waterQuadCount()==0) throw new IllegalStateException("Textured LOD water was not converted");
             if(MEMORY_PRESSURE && (maxMemoryDeferrals==0 || lod.memoryReductionCount()==0 || !observedBudgetRecovery
                     || pressureFallbackFrames<20 || !observedReducedProvider))
                 throw new IllegalStateException("LOD memory degradation/recovery was not observed before resource reload");
@@ -160,7 +206,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
             if(TEXTURE_FIXTURE && !Boolean.getBoolean("gysf.voxy.colourProxy") && leafCutouts==0)
                 throw new IllegalStateException("Foliage alpha-cutout metadata missing");
             System.out.println("GYSF_SMOKE: PASS frames="+RtComposite.frameCounter()+" maxVoxyMeshes="+maxMeshes+" maxRtLodSections="+maxRtSections+" texturedBatches="+textured+" atlasSlot="+VoxyCompat.boundAtlasSlot()+" leafCutoutQuads="+leafCutouts
-                    +" atomicSwaps="+lod.atomicVoxySwapCount()+" replacementSwaps="+lod.voxyReplacementSwapCount()+" coverageChecks="+lod.voxyCoverageCheckCount());
+                    +" atomicSwaps="+lod.atomicVoxySwapCount()+" replacementSwaps="+lod.voxyReplacementSwapCount()+" coverageChecks="+lod.voxyCoverageCheckCount()+" waterQuads="+lod.waterQuadCount());
             if(MOTION) System.out.println("GYSF_SMOKE: observed motion x="+motionMinX+".."+motionMaxX+" y="+motionMinY+".."+motionMaxY);
             if(memoryContext!=null) System.out.println("GYSF_SMOKE: memory live="+memoryContext.lodMemory().liveBytes()
                     +" peak="+memoryContext.lodMemory().peakBytes()+" deferrals="+maxMemoryDeferrals

@@ -55,7 +55,7 @@ float alphaDitherThreshold(uint salt) {
 // Exact per-section vanilla-terrain readiness test for the DH/Voxy hand-off. The mask is serialized
 // per frame by RtTerrain.writeDistantReadyMask into the WorldPush BDA ring; a zero address (or a
 // stale magic) suppresses nothing, so the LOD proxy stays visible until real terrain is published.
-bool vanillaRtSectionReady(float3 hitPos) {
+bool vanillaRtSectionReady(float3 hitPos, float3 ownershipNormal) {
     uint64_t maskAddr = pc.dhReadyMaskAddr;
     if (maskAddr == 0) {
         return false;
@@ -66,9 +66,9 @@ bool vanillaRtSectionReady(float3 hitPos) {
     }
     int3 minBlock = int3(asint(mask[0]), asint(mask[1]), asint(mask[2]));
     uint3 size = uint3(mask[3], mask[4], mask[5]);
-    // Probe just inside the surface along the ray. At a section boundary this selects the section
-    // containing the solid represented by the LOD face rather than the empty section in front of it.
-    int3 cell = int3(floor((hitPos + WorldRayDirection() * 0.01 - float3(minBlock)) / 16.0));
+    // Ownership follows the represented voxel, independently of which side a radiance/shadow ray
+    // approaches from. In particular, a ray leaving water must not probe the empty cell above it.
+    int3 cell = int3(floor((hitPos - ownershipNormal * 0.01 - float3(minBlock)) / 16.0));
     if (any(cell < int3(0, 0, 0)) || any(cell >= int3(size))) {
         return false;
     }
@@ -85,20 +85,21 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
 
     uint instanceKind = InstanceID() & (ENTITY_BIT | PARTICLE_BIT);
     if (instanceKind == DH_INSTANCE_KIND) {
+        Section sec = ConstPtr<Section>(pc.dhTableAddr)[InstanceID() & IDX_MASK];
+        uint tri = pid + sec.triBase[GeometryIndex()];
+        TerrainPrim pr = ConstPtr<TerrainPrim>(sec.primAddr)[tri];
+        bool textured = (pr.flags & PRIM_VOXY) != 0u;
+        float3 ownershipNormal = textured ? voxyOwnershipNormal(pr.flags) : pr.normal.xyz;
         float3 hitPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
-        if (vanillaRtSectionReady(hitPos)) {
+        if (vanillaRtSectionReady(hitPos, ownershipNormal)) {
             // Suppress this exact LOD section only after its real RT replacement is published, so the
             // transition ring never shows a hole or double geometry.
             IgnoreHit();
             return;
         }
 
-        Section sec = ConstPtr<Section>(pc.dhTableAddr)[InstanceID() & IDX_MASK];
-        uint tri = pid + sec.triBase[GeometryIndex()];
-        TerrainPrim pr = ConstPtr<TerrainPrim>(sec.primAddr)[tri];
         bool shadowRay = (RayFlags() & RAY_FLAG_SKIP_CLOSEST_HIT_SHADER) != 0u;
         uint dhSurface = uint(pr.tint.w + 0.5);
-        bool textured = (pr.flags & PRIM_VOXY) != 0u;
         float4 voxySample = float4(1.0);
         float3 dhColour = pr.tint.rgb;
         if (textured) {
@@ -107,15 +108,17 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
                 IgnoreHit();
                 return;
             }
-            // Coverage uses base alpha; colour in closest-hit keeps ray-cone mip filtering.
-            // Averaging the coverage mip can close the holes in distant foliage.
-            voxySample = voxyTexel(pr, voxyUv(sec, tri, bary), 0u, RayTCurrent(),
-                    entityAlbedoTex[NonUniformResourceIndex(slot)]);
-            if (voxySample.a < (((pr.flags & 32u) != 0u) ? ALPHA_CUTOFF : 0.01)) {
-                IgnoreHit();
-                return;
+            // Water uses the same optical biome tint as the near fluid mesher, without a sprite
+            // colour or alpha mask. Ordinary surfaces retain base-level alpha coverage.
+            if (dhSurface != DH_SURFACE_WATER) {
+                voxySample = voxyTexel(pr, voxyUv(sec, tri, bary), 0u, RayTCurrent(),
+                        entityAlbedoTex[NonUniformResourceIndex(slot)]);
+                if (voxySample.a < (((pr.flags & 32u) != 0u) ? ALPHA_CUTOFF : 0.01)) {
+                    IgnoreHit();
+                    return;
+                }
+                dhColour = voxyColour(pr, voxySample);
             }
-            dhColour = voxyColour(pr, voxySample);
         }
         if (dhSurface == DH_SURFACE_WATER && shadowRay) {
             payload.albedo *= half3(lerp(float3(1.0, 1.0, 1.0), dhColour, WATER_SHADOW_TINT));

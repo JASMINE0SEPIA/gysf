@@ -1,6 +1,15 @@
 import world_common;
 import math;
 
+// The packed face owns a voxel even when its fluid triangle slopes across that voxel. Using its
+// axis rather than the triangle normal keeps the ownership probe out of lateral neighbours.
+public float3 voxyOwnershipNormal(uint flags) {
+    uint face = flags & 7u;
+    float sign = (face & 1u) != 0u ? 1.0 : -1.0;
+    return face < 2u ? float3(0.0, sign, 0.0)
+            : face < 4u ? float3(0.0, 0.0, sign) : float3(sign, 0.0, 0.0);
+}
+
 public float2 voxyUv(Section section, uint primitive, float3 bary) {
     ConstPtr<float2> uv = ConstPtr<float2>(section.uvAddr);
     return bary.x * uv[primitive * 3u] + bary.y * uv[primitive * 3u + 1u] + bary.z * uv[primitive * 3u + 2u];

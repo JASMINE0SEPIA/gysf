@@ -84,6 +84,32 @@ final class RtVoxyMeshTest {
         assertEquals(1,packed.material()[4*12+7]);
     }
 
+    @Test void waterKeepsNearFluidOpticalTintWhileSolidAlbedoIsLinear() {
+        int biome=0x3F76E4;
+        var water=new VoxySceneData.Model(1,FULL,FULL,FULL,FULL,FULL,FULL,0,biome,null,true,true,false,0);
+        var solid=new VoxySceneData.Model(2,FULL,FULL,FULL,FULL,FULL,FULL,0,biome,null,false,false,false,0);
+        var packed=pack(source(new long[]{raw(1,1),raw(1,2)},water,solid));
+        int waterOffset=2*12;
+        assertArrayEquals(new float[]{.24705882f,.46274510f,.89411765f},
+                java.util.Arrays.copyOfRange(packed.material(),waterOffset+4,waterOffset+7),1e-6f);
+        assertArrayEquals(new float[]{.04970657f,.18116424f,.77582222f},
+                java.util.Arrays.copyOfRange(packed.material(),4,7),1e-6f);
+    }
+
+    @Test void slopedWaterKeepsVoxelFaceIdentitySeparateFromShadingNormal() {
+        int heights=0|(1<<3)|(4<<6)|(7<<9);
+        long quad=raw(1,1)|((long)(heights&255)<<3)|((long)((heights>>>8)&15)<<42);
+        var packed=pack(source(new long[]{quad},model(1,FULL,true,true)));
+        for(int tri=0;tri<2;tri++) {
+            int offset=tri*12;
+            assertEquals(1,Float.floatToRawIntBits(packed.material()[offset+9])&7);
+            assertTrue(packed.material()[offset+1]>0);
+            assertTrue(Math.abs(packed.material()[offset])>0 || Math.abs(packed.material()[offset+2])>0);
+            float nx=packed.material()[offset],ny=packed.material()[offset+1],nz=packed.material()[offset+2];
+            assertEquals(1,nx*nx+ny*ny+nz*nz,1e-6f);
+        }
+    }
+
     @Test void snapshotsRetainTheirOwnGeometryAndPalette() {
         var models=new VoxySceneData.Model[2]; models[1]=model(1,FULL,false,false);
         int[] colours={0x123456}; long[] quads={raw(1,1)};

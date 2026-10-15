@@ -17,6 +17,10 @@ Textured batches use the existing RT LOD section table, bounded BLAS scheduler,
 compaction and per-section vanilla-ready mask. Every triangle is non-opaque to
 Vulkan so primary, reflection and shadow rays can reject ready near terrain or
 transparent texels. A 3D API 5 selection bypasses DH's X/Z-only coarse filter.
+The readiness probe steps into the represented voxel along its packed face axis,
+independently of ray direction. A water triangle's sloped shading normal does not
+move that probe into lateral neighbours. The mask and hit position both use the
+current terrain rebase.
 
 Progressive publication also treats Voxy sections as aligned 3D cubes. An old
 source and all intersecting replacement sources form one handoff group. Every
@@ -51,15 +55,25 @@ cannot fill foliage holes; closest-hit albedo still uses ray-cone mip filtering.
 It preserves water/glass/emission classification
 and block-state material profiles. The baked RGBA atlas does not carry LabPBR
 normal/specular pages, and distant emitters do not yet enter the light-sampling
-hierarchy. Water retains the existing thin glossy LOD approximation.
+hierarchy. Water retains the existing thin glossy LOD approximation. Its biome
+colour uses the same normalized optical-tint convention as the near fluid
+mesher, without albedo linearization or multiplication by the baked blue water
+sprite. Shadow tint follows the same rule. Water sprite alpha does not remove
+water geometry. An outward crossing uses the existing dielectric water handler
+to exit a near/camera water medium, including its waves and Fresnel response.
+Entering rays keep the glossy approximation: sparse LOD water cannot push a new
+absorbing medium. This aligns tint inputs and permits water exits; transmission,
+volume absorption and waves on entering far-water hits still differ from near
+water, so it is not a complete near/far match.
 
 The decoding and atlas-layout reference is `skayla2007/Caustica` at
 `e83674e4d1c4ca02b6321de23cebaf7bb1cc90b6` (`RtVoxyMesh`, `voxy.slang`), adapted
 to the 26.3 renderer and existing scheduler. Fluid packing follows vooxxy's
 `quad_util.glsl` and `RenderDataFactory`.
 
-Nine CPU tests check winding, depth boundaries, greedy UV scale, fluid top/side
-heights, rebasing, material identity, bucket order and snapshot ownership.
+Eleven CPU tests check winding, depth boundaries, greedy UV scale, fluid top/side
+heights, rebasing, material identity, bucket order, snapshot ownership, water
+optical tint versus solid albedo, and sloped-water face identity.
 The provider retains leaf alpha-cutout metadata when an external renderer owns
 the world, instead of applying standalone Voxy's opaque foliage override.
 `-Dgysf.smoke.textureFixture=true` builds a leaf/plank/brick/glass/slab fixture
@@ -76,4 +90,8 @@ resource-reload/dimension lifecycle test instead of shortening it.
 positive/negative X at changing heights, teleports to another quadrant and
 returns. It requires observed replacement swaps and coverage checks; use it
 with `gysf.voxy.validateCoverage=true`.
+`-Dgysf.smoke.waterFixture=true` adds a quartz-bottomed pool across section
+boundaries, verifies that it spans ready near terrain and unready far terrain,
+records above-water and underwater views, and requires converted LOD water.
+Use it with the full run; `visualOnly` exits before the underwater view.
 GPU and visual observations belong in the validation record.
