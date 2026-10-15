@@ -28,7 +28,9 @@ tile size from image dimensions, clamps each face at the chosen mip and handles
 the provider's reduced-resolution mip-tail atlas without fixed pixel offsets.
 
 The shader samples per-face albedo/alpha and applies the model's conditional
-biome tint in linear lighting. It preserves water/glass/emission classification
+biome tint in linear lighting. Coverage uses base-level alpha so mip averaging
+cannot fill foliage holes; closest-hit albedo still uses ray-cone mip filtering.
+It preserves water/glass/emission classification
 and block-state material profiles. The baked RGBA atlas does not carry LabPBR
 normal/specular pages, and distant emitters do not yet enter the light-sampling
 hierarchy. Water retains the existing thin glossy LOD approximation.

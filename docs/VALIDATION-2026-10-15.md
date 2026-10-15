@@ -86,17 +86,44 @@ also pass. The provider commit is `2b77524e3b080108be7a875e9ea442abf14edfc0`.
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Fixed-seed world and dimension round trip | 4420 | 336 | 355 | 1520 | 7 |
 | Added isolated material fixture and dimension round trip | 4166 | 421 | 446 | 1639 | 8 |
+| External foliage cutout policy, visual control and full lifecycle | 4590 | 421 | 437 | 1601 | 7 |
+| Final base-alpha coverage, short visual control | 2474 | 421 | 452 | 856 | 3 |
 
 Both runs enable DLSS-RR and disable OMM to avoid the installed SDK checker bug.
 They complete movement, resource reload, Nether travel and return, saving and
 shutdown with zero VUID, synchronization hazard, device loss or external-provider
 failure. The typed path is required by the harness: it rejects zero textured
 batch count, an empty typed snapshot or an unbound atlas after returning.
+The last full run also verifies nonzero leaf-cutout metadata (83,543 converted
+leaf quads across its batches). The fixture's near RT section reports not ready,
+and hiding only textured LOD hits removes the fixture at the same camera. That
+control establishes that the samples are rendered through the LOD path.
+
+Visual inspection additionally identified alpha mip averaging closing foliage
+holes. Any-hit now reads base-level coverage, independently of the closest-hit
+ray-cone mip choice for albedo. The final alpha visual run is recorded below.
 
 The production renderer now samples per-face RGBA, applies conditional biome
 tint, clips alpha and preserves Voxy's fractional/fluid geometry. Full per-sprite
 normal/specular PBR, sampled distant emitters, comprehensive handoff/reflection
 acceptance and total-residency memory pressure testing remain open. Sparse
 visited terrain still leaves gaps in the isolated camera's uncached horizon.
+
+The final short run uses the same packaged provider (`cd7fb2e3`) and requires
+typed meshes, a bound atlas and foliage cutout metadata (57,384 converted leaf
+quads). It reports no Vulkan/provider/compositor failures, restores the atlas
+after the control, saves and exits. This 990-tick visual test does not repeat
+resource reload or dimension travel; the 4590-frame run above covers those.
+CPU tests remain 132 + 22 passing after the shader change.
+
+The 30-degree-FOV fixture is at z=100, beyond its ready near RT sections
+(`fixture near-ready=false`). In the first image, glass texture and leaf holes
+are visible. In the same-camera control, only textured Voxy hits are rejected;
+the fixture disappears. This establishes the LOD texture/coverage path, not
+universal scene or performance acceptance.
+
+![Textured LOD fixture](images/textured-lod.png)
+
+![Same camera with textured LOD hidden](images/textured-lod-control.png)
 
 Raw logs and screenshots stay locally under ignored `artifacts/2026-10-15/`.

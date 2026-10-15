@@ -107,7 +107,9 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
                 IgnoreHit();
                 return;
             }
-            voxySample = voxyTexel(pr, voxyUv(sec, tri, bary), payload.rayCone, RayTCurrent(),
+            // Coverage uses base alpha; colour in closest-hit keeps ray-cone mip filtering.
+            // Averaging the coverage mip can close the holes in distant foliage.
+            voxySample = voxyTexel(pr, voxyUv(sec, tri, bary), 0u, RayTCurrent(),
                     entityAlbedoTex[NonUniformResourceIndex(slot)]);
             if (voxySample.a < (((pr.flags & 32u) != 0u) ? ALPHA_CUTOFF : 0.01)) {
                 IgnoreHit();
