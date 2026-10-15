@@ -1,6 +1,7 @@
 // Compare production temporal guides against the actual field at the previous frame's phase.
 import water;
 import world_core;
+import water_test_frame;
 RWStructuredBuffer<uint> result;
 
 [shader("compute")]
@@ -13,7 +14,7 @@ void waterTemporalProbe(uint3 id : SV_DispatchThreadID) {
     uint failuresByDelta[6]={0,0,0,0,0,0};
     float times[5]={0.0,0.37,17.51,1023.875,3599.5};
     float deltas[6]={0.0,1.0/240.0,1.0/60.0,1.0/30.0,0.1,0.25};
-    worldPush.waterAnchor=float4(0.0);
+    setWaterTestDomain(float2(0.0));
     for(int ti=0;ti<5;ti++) for(int sample=0;sample<16;sample++)
     for(int si=0;si<3;si++) for(int speedIndex=0;speedIndex<3;speedIndex++)
     for(int di=0;di<6;di++) for(int fi=0;fi<3;fi++) {

@@ -406,10 +406,6 @@ public final class RtComposite {
         return new Int4(terrain.blockX, terrain.blockY, terrain.blockZ, RtSharc.INSTANCE.entryCount());
     }
 
-    // Finite sun/moon angular sizes let NEE shadow rays sample the light disk (soft, contact-hardening
-    // penumbrae). Radii in degrees; the real sun/moon are ~0.27°, but a touch larger reads pleasantly.
-    private static final int WATER_ANCHOR_MASK = 4095;
-
     // ---- SVGF denoiser tuning (see RtSvgfDenoiser + shaders/display/svgf_*.comp).
     //
     // Accumulation window. Longer than the old TAA's 32 frames because history is now rejected on
@@ -730,8 +726,11 @@ public final class RtComposite {
     private float mvCamDeltaY;
     private float mvCamDeltaZ;
     private boolean mvHasPrev;
-    private float previousWaterWaveTime;
-    private boolean waterWaveTimeValid;
+    private final RtWaterWaveClock waterWaveClock = new RtWaterWaveClock();
+    private int waterWaveOriginX, waterWaveOriginZ;
+    private double waterWaveBaseSeconds;
+    private float waterWaveCachedSpeed;
+    private WorldPushData.WaterWaveDomain[] waterWaveDomains;
     private long atlasSampler;
     private boolean failed;
     private boolean loggedActive;
@@ -1471,7 +1470,7 @@ public final class RtComposite {
         exposure.ensureResources(ctx);
 
         mvHasPrev = false; // recreated images -> first MV frame is zero
-        waterWaveTimeValid = false;
+        waterWaveClock.resetHistory();
         if (worldPipeline != null) {
             worldPipeline.setStorageImage(output.view);
             bindGuideImages();
@@ -1484,6 +1483,29 @@ public final class RtComposite {
      * into the previous frame's clip space, plus the per-frame camera translation. On the first frame
      * (or after a reset) push the current view-projection with zero delta so MVs come out zero.
      */
+    private WorldPushData.WaterWaveDomain[] waterWaveDomains(int originX, int originZ, double baseSeconds) {
+        float speed = CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.value();
+        if (waterWaveDomains == null || waterWaveOriginX != originX || waterWaveOriginZ != originZ
+                || waterWaveBaseSeconds != baseSeconds || waterWaveCachedSpeed != speed) {
+            RtWaterWaveDomain.Component[] components = RtWaterWaveDomain.create(originX, originZ, baseSeconds, speed);
+            if (components.length != WorldPushData.WATER_WAVE_DOMAINS_CAPACITY) {
+                throw new IllegalStateException("Water domain count differs from reflected shader capacity");
+            }
+            var domains = new WorldPushData.WaterWaveDomain[components.length];
+            for (int i = 0; i < domains.length; i++) {
+                var c = components[i];
+                domains[i] = new WorldPushData.WaterWaveDomain(new Float4(c.kx(), c.kz(), c.mx(), c.mz()),
+                        new Float4(c.mainPhase(), c.meanderPhase(), c.omega(), 0f));
+            }
+            waterWaveDomains = domains;
+            waterWaveOriginX = originX;
+            waterWaveOriginZ = originZ;
+            waterWaveBaseSeconds = baseSeconds;
+            waterWaveCachedSpeed = speed;
+        }
+        return waterWaveDomains;
+    }
+
     private void updateMotion() {
         mvCurProjView.set(frameProjection).mul(frameViewRotation);
         if (mvHasPrev) {
@@ -1637,21 +1659,12 @@ public final class RtComposite {
                 wtg = ((wc >> 8) & 0xFF) / 255f;
                 wtb = (wc & 0xFF) / 255f;
             }
-            float waterWaveTime = (float) (System.nanoTime() / 1.0e9 % 3600.0);
-            float waterWaveDelta = waterWaveTime - previousWaterWaveTime;
-            // A first frame, long pause, or one-hour phase wrap has no adjacent wave frame to reproject.
-            // Use the current phase so the reflection MV is neutral instead of manufacturing a huge jump.
-            float priorWaterWaveTime = waterWaveTimeValid
-                    && waterWaveDelta >= 0f && waterWaveDelta <= 0.25f
-                    ? previousWaterWaveTime : waterWaveTime;
-            previousWaterWaveTime = waterWaveTime;
-            waterWaveTimeValid = true;
-            Float4 waterParams = new Float4(wtr, wtg, wtb, waterWaveTime);
-            // W1 wave-domain anchor: the terrain rebase origin reduced mod 4096 (kept small for shader
-            // float precision). hitPos.xz (rebased) + anchor reconstructs a world-pinned coordinate, so the
-            // ripple pattern stays fixed in the world as the player moves and the rebase origin shifts.
-            Float4 waterAnchor = new Float4(terrain.blockX & WATER_ANCHOR_MASK,
-                    terrain.blockZ & WATER_ANCHOR_MASK, priorWaterWaveTime, 0f);
+            double animationSeconds = System.nanoTime() / 1.0e9;
+            var waveFrame = waterWaveClock.at(animationSeconds);
+            Float4 waterParams = new Float4(wtr, wtg, wtb, (float)(animationSeconds % 3600.0));
+            // Reducing world coordinates modulo 4096 changes the incommensurate wave field at that
+            // boundary. Transport each wave's full-origin phase instead; shader positions stay local.
+            Float4 waterAnchor = new Float4(waveFrame.currentTime(), 0f, waveFrame.previousTime(), 0f);
 
             // Rebuild the TLAS this frame from static section instances merged with dynamic entity
             // instances, bind it into the pipeline's descriptor ring, record the build, then barrier so
@@ -1701,6 +1714,7 @@ public final class RtComposite {
                     sky.moonUv(),
                     waterParams,
                     waterAnchor,
+                    waterWaveDomains(terrain.blockX, terrain.blockZ, waveFrame.baseSeconds()),
                     mvCurProjView,
                     breaking.length,
                     breaking,

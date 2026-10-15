@@ -63,6 +63,11 @@ public struct PackedRestirReservoir {
 // Per-frame world data, read through a 64-bit device address. WorldPushData.java is generated from this
 // reflected type, including its serializer, byte size, vector/matrix types, and fixed-array capacities.
 
+public struct WaterWaveDomain {
+    public float4 axes;              // main and meander spatial phase gradients
+    public float4 phase;             // xy full-origin/long-time phases (reduced), z frequency, w reserved
+};
+
 public struct WorldPush {
     public float4x4 invViewProj;
     public float3   camOffset;
@@ -80,8 +85,9 @@ public struct WorldPush {
     public float4   celestial;        // xyz celestial rotation axis, w star angle (rad)
     public float4   sunUv;            // vanilla sun sprite atlas rect (u0,v0,u1,v1)
     public float4   moonUv;           // vanilla current-moon-phase sprite atlas rect
-    public float4   waterParams;      // xyz camera-biome water tint, w wave time (s)
-    public float4   waterAnchor;      // xy world-stable wave-domain anchor, z previous wave time
+    public float4   waterParams;      // xyz camera-biome water tint, w portal/glint animation time (wrapped s)
+    public float4   waterAnchor;      // x current / z previous wave seconds relative to the same 8 s base
+    public WaterWaveDomain waterWaveDomains[7]; // CPU origin phases, evaluated with rebased hit coordinates
     public float4x4 curViewProj;      // forward camera-relative view-projection
     public uint     breakCount;
     public BreakEntry breaking[8];    // Java capacity and breakCount serialization are generated from this

@@ -301,14 +301,13 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex,
 
             // Lift the (near-flat) rest-plane hit onto the wave height field before any Fresnel use →
             // real crests/troughs, glints, broken reflections, wobbling refraction. The wave domain is
-            // world-stable: rebased hit XZ plus the pushed anchor (terrain origin mod 4096) survives
-            // the per-move terrain rebase.
+            // world-stable: per-wave phases carry the full terrain origin while hits stay rebased.
             float3 geometricNormal = n; // unrippled; ray origins offset along this
             WaterWaves waterSurf = flatWaterWaves(hitPos, payload.hitT, geometricNormal);
             if (isWater && waterWaves) {
                 float waterFootprint = rayConeWidth / max(abs(dot(-rd, geometricNormal)), 0.2);
                 waterSurf = evaluateWaterWaves(ro, rd, payload.hitT, geometricNormal,
-                        worldPush.waterParams.w, worldPush.waterParams.w, waterFootprint);
+                        worldPush.waterAnchor.x, worldPush.waterAnchor.x, waterFootprint);
                 n = waterSurf.normal;
                 hitPos = waterSurf.position;
             }

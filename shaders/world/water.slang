@@ -37,7 +37,7 @@ public static const float WAVE_Q[WAVE_COUNT] = { 0.050, 0.058, 0.055, 0.048, 0.0
 // in world_common.slang): y = wave height scale, z = animation speed scale, w = spectrum wave count.
 // The sliders in the Water settings sub-screen write these; the clamps below keep a bad push from
 // ever unbounding the spectrum walk or exploding the height field, and the authored constants above
-// stay the 1.0 reference. Default push (1.0, 1.0, 7) reproduces the stock look bit-for-bit.
+// stay the 1.0 reference. Default tuning (1.0, 1.0, 7) retains the authored spectrum.
 public float waterWaveStrengthScale() { return clamp(worldPush.waterOpacity.y, 0.0, 4.0); }
 public float waterWaveSpeedScale() { return clamp(worldPush.waterOpacity.z, 0.0, 4.0); }
 public int waterWaveCount() { return clamp(int(worldPush.waterOpacity.w + 0.5), 1, WAVE_COUNT); }
@@ -45,6 +45,25 @@ public int waterWaveCount() { return clamp(int(worldPush.waterOpacity.w + 0.5), 
 public float waterWaveLodWeight(float wavelength, float footprint) {
     float cyclesPerPixel = max(footprint, 0.0) / max(wavelength, 1.0e-4);
     return 1.0 - smoothstep(0.25, 0.5, cyclesPerPixel);
+}
+
+// Authored basis for CPU/Slang transport validation. Rendering consumes the exact FP32 coefficients
+// supplied alongside the origin phases, so CPU/GPU trigonometric rounding cannot cause rebase drift.
+public float4 waterWaveBasis(int i) {
+    float lambda=WAVE_LAMBDA0;
+    for(int j=0;j<i;j++) lambda/=WAVE_LAMBDA_RATIO;
+    float k=2.0*PI/lambda;
+    float spread=(0.28+0.22*float(i))*sin(float(i)*2.399+1.3)
+                +0.31*sin(float(i)*3.883+0.6)+0.17*sin(float(i)*5.236+2.1);
+    float cs=cos(spread),sn=sin(spread);
+    float2 d=float2(WAVE_WIND.x*cs-WAVE_WIND.y*sn,WAVE_WIND.x*sn+WAVE_WIND.y*cs);
+    return float4(k*d,0.37*k*float2(-d.y,d.x));
+}
+
+public float waterWaveFrequency(int i) {
+    float lambda=WAVE_LAMBDA0;
+    for(int j=0;j<i;j++) lambda/=WAVE_LAMBDA_RATIO;
+    return sqrt(WAVE_G*(2.0*PI/lambda));
 }
 
 // One walk of the wave spectrum, shared by every consumer so the spectrum constants exist once. WITH_DT
@@ -68,27 +87,20 @@ public void waterWaveSpectrum<let WITH_DT : int>(float2 p, float t, float footpr
         float lodWeight = waterWaveLodWeight(lambda, footprint);
         if (lodWeight <= 0.0) break;
         float k = 2.0 * PI / lambda;
-        float w = sqrt(WAVE_G * k);   // deep-water dispersion: phase speed √(g/k)
-        // Heading: wide irregular spread about the wind, with incommensurate offsets so wavefronts
-        // cannot lock into a rectangular lattice.
-        float spread = (0.28 + 0.22 * float(i)) * sin(float(i) * 2.399 + 1.3)
-                     + 0.31 * sin(float(i) * 3.883 + 0.6)
-                     + 0.17 * sin(float(i) * 5.236 + 2.1);
-        float cs = cos(spread), sn = sin(spread);
-        float2 d = float2(WAVE_WIND.x * cs - WAVE_WIND.y * sn, WAVE_WIND.x * sn + WAVE_WIND.y * cs);
-        float ph = k * dot(d, p) - w * t + 2.399 * float(i) * float(i);
-        float2 dph = k * d;
+        WaterWaveDomain domain=worldPush.waterWaveDomains[i];
+        float w = domain.phase.z;     // deep-water dispersion, shared exactly with the CPU phase base
+        float ph = dot(domain.axes.xy,p)+domain.phase.x - w * t + 2.399 * float(i) * float(i);
+        float2 dph = domain.axes.xy;
         float phDt = -w;                      // ∂φ/∂t
         float2 dphDt = float2(0.0, 0.0);      // ∂(∇φ)/∂t
         if (i < 6) { // meander every swell component whose front would otherwise rule a straight line
-            float2 pd = float2(-d.y, d.x);
-            float wph = 0.37 * k * dot(pd, p) + 0.47 * w * t;
+            float wph = dot(domain.axes.zw,p)+domain.phase.y + 0.47 * w * t;
             ph += WAVE_MEANDER * sin(wph);
-            dph += (WAVE_MEANDER * cos(wph) * 0.37 * k) * pd;
+            dph += (WAVE_MEANDER * cos(wph)) * domain.axes.zw;
             if (WITH_DT != 0) {
                 float wphDt = 0.47 * w;
                 phDt += WAVE_MEANDER * cos(wph) * wphDt;
-                dphDt = (-WAVE_MEANDER * sin(wph) * wphDt * 0.37 * k) * pd;
+                dphDt = (-WAVE_MEANDER * sin(wph) * wphDt) * domain.axes.zw;
             }
         }
         float S = 1.15 + 0.08 * float(i); // mild crest sharpening; keep the profile as waves, not tiles
@@ -158,17 +170,17 @@ public void waterWaveGradTemporal(float2 p, float currentT, float previousT, flo
 }
 
 // Perturb a (near-)horizontal water surface normal by the wave field. Flowing side faces (|n.y| small)
-// keep their flat geometric normal. `worldXZ` must be a world-stable coordinate (rebased hit + the pushed
-// anchor) so the ripples stay pinned in the world. `nGeo` is already oriented toward the viewer, so the
+// keep their flat geometric normal. Coordinates must use the same terrain rebase as the transported
+// origin phases, keeping ripples pinned in the world. `nGeo` is already oriented toward the viewer, so the
 // down-viewed underside (n.y < 0) takes the mirrored slope. Add the wave gradient to the actual
 // rest-plane slope: replacing it with a horizontal normal changes flowing water even at zero height.
 public float3 waterSurfaceNormal(float3 nGeo, float2 gradient) {
     return normalize(float3(nGeo.x-nGeo.y*gradient.x,nGeo.y,nGeo.z-nGeo.y*gradient.y));
 }
 
-public float3 applyWaterWaves(float3 nGeo, float2 worldXZ, float t, float footprint) {
+public float3 applyWaterWaves(float3 nGeo, float2 rebasedXZ, float t, float footprint) {
     if (abs(nGeo.y) < 0.5) return nGeo;
-    float2 grad = waterWaveGrad(worldXZ, t, footprint);
+    float2 grad = waterWaveGrad(rebasedXZ, t, footprint);
     return waterSurfaceNormal(nGeo,grad);
 }
 
@@ -207,7 +219,7 @@ public WaterWaves evaluateWaterWaves(float3 ro, float3 rd, float hitT, float3 nG
         return flatWaterWaves(planePos, hitT, nGeo);
     }
 
-    float2 domain0 = planePos.xz + worldPush.waterAnchor.xy;
+    float2 domain0 = planePos.xz; // full world-origin phases are already in waterWaveDomains
     float invNy = 1.0 / nGeo.y;
     float planeRate=dot(nGeo,rd)*invNy;
     float maxTravel=WAVE_MAX_HEIGHT*waterWaveStrengthScale()/max(abs(planeRate),0.05);
@@ -295,9 +307,9 @@ public float waterCaustic(float3 exitPos, float3 lightDir, float waterDist) {
     float fade = smoothstep(0.06, 0.18, lightDir.y);
     if (fade <= 0.0) return 1.0;
     float h = max(waterDist * lightDir.y, 0.05); // vertical depth of the receiver below the exit point
-    float t = worldPush.waterParams.w;
+    float t = worldPush.waterAnchor.x;
     float3 inc = -lightDir;
-    float2 base = exitPos.xz + worldPush.waterAnchor.xy;  // world-stable wave domain (same as evaluateWaterWaves)
+    float2 base = exitPos.xz; // same transported world phases as evaluateWaterWaves
     float2 p0 = causticLanding(base, t, inc, h);
     float2 px = causticLanding(base + float2(CAUSTIC_EPS, 0.0), t, inc, h);
     float2 pz = causticLanding(base + float2(0.0, CAUSTIC_EPS), t, inc, h);

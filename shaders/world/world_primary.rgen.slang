@@ -109,7 +109,7 @@ public PathSegment tracePrimary(PathSegment seg,
         if (isWater && waterWaves) {
             float waterFootprint = rayConeWidth / max(abs(dot(-rd, geometricNormal)), 0.2);
             waterSurf = evaluateWaterWaves(ro, rd, payload.hitT, geometricNormal,
-                    worldPush.waterParams.w, worldPush.waterAnchor.z, waterFootprint);
+                    worldPush.waterAnchor.x, worldPush.waterAnchor.z, waterFootprint);
             n = waterSurf.normal;
             previousNormal = waterSurf.previousNormal;
             hitPos = waterSurf.position;

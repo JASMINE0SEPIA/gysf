@@ -1,6 +1,7 @@
 // Execute production wave evaluation; finite differences and the zero-amplitude identity are oracles.
 import water;
 import world_core;
+import water_test_frame;
 RWStructuredBuffer<uint> result;
 
 [shader("compute")]
@@ -16,7 +17,7 @@ void waterSurfaceProbe(uint3 id : SV_DispatchThreadID) {
         lambda/=WAVE_LAMBDA_RATIO;
     }
     if(envelope*WATER_WAVE_STRENGTH>WAVE_MAX_HEIGHT) heightFailures++;
-    worldPush.waterAnchor=float4(0.0);
+    setWaterTestDomain(float2(0.0));
     worldPush.waterOpacity=float4(1.0,0.0,1.0,7.0);
     for(int side=0;side<2;side++) for(int x=-4;x<=4;x++) for(int z=-4;z<=4;z++) {
         float sign=side==0?1.0:-1.0;
@@ -60,10 +61,10 @@ void waterSurfaceProbe(uint3 id : SV_DispatchThreadID) {
     worldPush.waterOpacity=float4(1.0,1.0,1.0,7.0);
     for(int step=0;step<32;step++) {
         float3 p=float3(2.0,112.0,-3.0),rd=float3(0.0,-1.0,0.0),n=normalize(float3(-0.4,1.0,0.3));
-        worldPush.waterAnchor=float4(2048.0,-4096.0,0.0,0.0);
+        setWaterTestDomain(float2(2048.0,-4096.0));
         WaterWaves a=evaluateWaterWaves(p-rd*4.0,rd,4.0,n,float(step)*0.07,float(step)*0.07-0.016,0.0);
         float3 shift=float3(512.0,0.0,-1024.0);
-        worldPush.waterAnchor.xy+=shift.xz;
+        setWaterTestDomain(float2(2048.0,-4096.0)+shift.xz);
         WaterWaves b=evaluateWaterWaves(p-shift-rd*4.0,rd,4.0,n,float(step)*0.07,float(step)*0.07-0.016,0.0);
         if(length(a.position-(b.position+shift))>1.0e-4 || length(a.normal-b.normal)>1.0e-4
                 || length(a.previousNormal-b.previousNormal)>1.0e-4 || length(a.motionPrev-b.motionPrev)>1.0e-4) anchorFailures++;

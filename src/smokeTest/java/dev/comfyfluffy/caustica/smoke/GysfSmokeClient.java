@@ -26,6 +26,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private static final boolean STATIC_WATER=WATER_MATRIX || WATER_COMPARE || Boolean.getBoolean("gysf.smoke.staticWaterFixture");
     private static final boolean WATER_FIXTURE=WATER_MATRIX || WATER_COMPARE || Boolean.getBoolean("gysf.smoke.waterFixture");
     private static final boolean MOTION=Boolean.getBoolean("gysf.smoke.motion");
+    private static final boolean WATER_DOMAIN_MOTION=Boolean.getBoolean("gysf.smoke.waterDomainMotion");
     private static final boolean MEMORY_PRESSURE=Boolean.getBoolean("gysf.smoke.memoryPressure");
     private static final boolean FLUID_TOPOLOGY=Boolean.getBoolean("gysf.smoke.fluidTopology");
     private static final boolean FLUID_TOPOLOGY_EDITS=Boolean.getBoolean("gysf.smoke.fluidTopologyEdits");
@@ -38,6 +39,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private int exitTicks;
     private double motionMinX=Double.POSITIVE_INFINITY,motionMaxX=Double.NEGATIVE_INFINITY;
     private double motionMinY=Double.POSITIVE_INFINITY,motionMaxY=Double.NEGATIVE_INFINITY;
+    private int terrainMinX=Integer.MAX_VALUE,terrainMaxX=Integer.MIN_VALUE;
     private String originalMemoryLimit;
     private long maxMemoryDeferrals;
     private boolean sawDriverBudget, observedBudgetRecovery;
@@ -71,6 +73,8 @@ public final class GysfSmokeClient implements ClientModInitializer {
         if (MOTION && worldTicks>=1750 && worldTicks<=2300) {
             motionMinX=Math.min(motionMinX,client.player.getX()); motionMaxX=Math.max(motionMaxX,client.player.getX());
             motionMinY=Math.min(motionMinY,client.player.getY()); motionMaxY=Math.max(motionMaxY,client.player.getY());
+            var near=dev.comfyfluffy.caustica.rt.terrain.RtTerrain.currentOrNull();
+            if(near!=null) { terrainMinX=Math.min(terrainMinX,near.blockX); terrainMaxX=Math.max(terrainMaxX,near.blockX); }
         }
         if (client.level.dimension().equals(net.minecraft.world.level.Level.NETHER)) visitedNether=true;
         if (visitedNether && client.level.dimension().equals(net.minecraft.world.level.Level.OVERWORLD)) returnedOverworld=true;
@@ -243,7 +247,8 @@ public final class GysfSmokeClient implements ClientModInitializer {
         if (!WATER_MATRIX && !WATER_COMPARE && worldTicks==1650) client.player.connection.sendCommand("execute in minecraft:overworld run tp @s 0 140 0");
         if (MOTION && worldTicks>=1750 && worldTicks<=2050 && worldTicks%10==0) {
             int step=(worldTicks-1750)/10;
-            client.player.connection.sendCommand("tp @s "+(-256+step*24)+" "+(80+(step%8)*16)+" -128 0 20");
+            int x=WATER_DOMAIN_MOTION && step<20 ? (step<10?4096+(step-4)*64:-4096+(step-14)*64) : -256+step*24;
+            client.player.connection.sendCommand("tp @s "+x+" "+(80+(step%8)*16)+" -128 0 20");
         }
         if (MOTION && worldTicks==1905)
             dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.requestFullRefresh();
@@ -285,6 +290,8 @@ public final class GysfSmokeClient implements ClientModInitializer {
                 throw new IllegalStateException("Voxy coverage validation or replacement handoffs missing");
             if(MOTION && (motionMinX>-300 || motionMaxX<400 || motionMinY>100 || motionMaxY<170))
                 throw new IllegalStateException("Scripted camera route was not observed");
+            if(WATER_DOMAIN_MOTION && (!MOTION || terrainMinX>-3800 || terrainMaxX<3800))
+                throw new IllegalStateException("Positive and negative water-domain terrain rebases were not observed");
             if (Boolean.getBoolean("gysf.smoke.vooxxy") && !Boolean.getBoolean("gysf.voxy.colourProxy")
                     && (textured==0 || VoxyCompat.texturedMeshCount()==0 || VoxyCompat.boundAtlasSlot()==0))
                 throw new IllegalStateException("Textured Voxy geometry or atlas binding missing");
@@ -293,6 +300,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
             System.out.println("GYSF_SMOKE: PASS frames="+RtComposite.frameCounter()+" maxVoxyMeshes="+maxMeshes+" maxRtLodSections="+maxRtSections+" texturedBatches="+textured+" atlasSlot="+VoxyCompat.boundAtlasSlot()+" leafCutoutQuads="+leafCutouts
                     +" atomicSwaps="+lod.atomicVoxySwapCount()+" replacementSwaps="+lod.voxyReplacementSwapCount()+" coverageChecks="+lod.voxyCoverageCheckCount()+" waterQuads="+lod.waterQuadCount()+" preciseFluidQuads="+lod.preciseFluidQuadCount());
             if(MOTION) System.out.println("GYSF_SMOKE: observed motion x="+motionMinX+".."+motionMaxX+" y="+motionMinY+".."+motionMaxY);
+            if(WATER_DOMAIN_MOTION) System.out.println("GYSF_SMOKE: observed terrain origin x="+terrainMinX+".."+terrainMaxX);
             if(memoryContext!=null) System.out.println("GYSF_SMOKE: memory live="+memoryContext.lodMemory().liveBytes()
                     +" peak="+memoryContext.lodMemory().peakBytes()+" deferrals="+maxMemoryDeferrals
                     +" reductions="+lod.memoryReductionCount()+" recoveries="+lod.memoryRecoveryCount()
