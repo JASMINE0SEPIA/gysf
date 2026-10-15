@@ -1,6 +1,7 @@
 package dev.comfyfluffy.caustica.smoke;
 
 import dev.comfyfluffy.caustica.compat.VoxyCompat;
+import dev.comfyfluffy.caustica.CausticaConfig;
 import dev.comfyfluffy.caustica.rt.RtComposite;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -19,7 +20,8 @@ import java.nio.file.*;
 public final class GysfSmokeClient implements ClientModInitializer {
     private static final String WORLD="gysf-26.3-smoke";
     private static final boolean TEXTURE_FIXTURE=Boolean.getBoolean("gysf.smoke.textureFixture");
-    private static final boolean WATER_FIXTURE=Boolean.getBoolean("gysf.smoke.waterFixture");
+    private static final boolean WATER_MATRIX=Boolean.getBoolean("gysf.smoke.waterMatrix");
+    private static final boolean WATER_FIXTURE=WATER_MATRIX || Boolean.getBoolean("gysf.smoke.waterFixture");
     private static final boolean MOTION=Boolean.getBoolean("gysf.smoke.motion");
     private static final boolean MEMORY_PRESSURE=Boolean.getBoolean("gysf.smoke.memoryPressure");
     private static final boolean VISUAL_ONLY=TEXTURE_FIXTURE && Boolean.getBoolean("gysf.smoke.visualOnly");
@@ -157,16 +159,33 @@ public final class GysfSmokeClient implements ClientModInitializer {
                 image->{try {image.writeToFile(Path.of("screenshots","gysf-no-textured-control.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
         if (VISUAL_CONTROL && worldTicks==980) System.clearProperty("gysf.voxy.hideTextured");
         if (worldTicks==1000) reload=client.reloadResourcePacks();
-        if (WATER_FIXTURE && worldTicks==1100) client.player.connection.sendCommand("tp @s 64 110 32 0 -2");
+        if (WATER_FIXTURE && worldTicks==1100) {
+            client.player.connection.sendCommand("tp @s 64 110 32 0 -2");
+            if(WATER_MATRIX) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(0f);
+        }
         if (WATER_FIXTURE && worldTicks==1250) {
             if(!client.player.isUnderWater()) throw new IllegalStateException("Underwater camera was not observed");
             Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                     image->{try {image.writeToFile(Path.of("screenshots","gysf-water-underwater.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
             System.out.println("GYSF_SMOKE: underwater water fixture captured");
+            if(WATER_MATRIX) waterCapture(client,"baseline");
+        }
+        if(WATER_MATRIX) {
+            if(worldTicks==1260) System.setProperty("gysf.voxy.hideTextured","true");
+            if(worldTicks==1340) waterCapture(client,"no-lod");
+            if(worldTicks==1345) { System.clearProperty("gysf.voxy.hideTextured"); CausticaConfig.Rt.Composite.WATER_WAVES.set(false); }
+            if(worldTicks==1425) waterCapture(client,"flat");
+            if(worldTicks==1430) { CausticaConfig.Rt.Composite.WATER_WAVES.set(true); CausticaConfig.Rt.Composite.MAX_BOUNCES.set(8); }
+            if(worldTicks==1510) waterCapture(client,"eight-bounces");
+            if(worldTicks==1515) CausticaConfig.Rt.Composite.DENOISER.set(false);
+            if(worldTicks==1595) waterCapture(client,"raw-eight");
+            if(worldTicks==1600) CausticaConfig.Rt.Composite.MAX_BOUNCES.set(2);
+            if(worldTicks==1680) waterCapture(client,"raw-two");
+            if(worldTicks==1685) { CausticaConfig.Rt.Composite.DENOISER.set(true); CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(1f); }
         }
         if (WATER_FIXTURE && worldTicks==1280) client.player.connection.sendCommand("forceload remove 32 0 96 160");
-        if (worldTicks==1350) client.player.connection.sendCommand("execute in minecraft:the_nether run tp @s 0 90 0");
-        if (worldTicks==1650) client.player.connection.sendCommand("execute in minecraft:overworld run tp @s 0 140 0");
+        if (!WATER_MATRIX && worldTicks==1350) client.player.connection.sendCommand("execute in minecraft:the_nether run tp @s 0 90 0");
+        if (!WATER_MATRIX && worldTicks==1650) client.player.connection.sendCommand("execute in minecraft:overworld run tp @s 0 140 0");
         if (MOTION && worldTicks>=1750 && worldTicks<=2050 && worldTicks%10==0) {
             int step=(worldTicks-1750)/10;
             client.player.connection.sendCommand("tp @s "+(-256+step*24)+" "+(80+(step%8)*16)+" -128 0 20");
@@ -177,11 +196,11 @@ public final class GysfSmokeClient implements ClientModInitializer {
         if (MOTION && worldTicks==2300) client.player.connection.sendCommand("tp @s 0 140 0 0 16");
         if (MOTION && worldTicks==2800) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                 image->{try {image.writeToFile(Path.of("screenshots","gysf-motion-return.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
-        if (worldTicks==(VISUAL_ONLY?990:MOTION?2900:2200)) {
+        if (worldTicks==(WATER_MATRIX?1720:VISUAL_ONLY?990:MOTION?2900:2200)) {
             if(!VISUAL_ONLY) {
                 if (reload==null || !reload.isDone()) throw new IllegalStateException("Resource reload incomplete");
                 reload.join();
-                if (!visitedNether || !returnedOverworld) throw new IllegalStateException("Dimension round trip incomplete");
+                if (!WATER_MATRIX && (!visitedNether || !returnedOverworld)) throw new IllegalStateException("Dimension round trip incomplete");
             }
             if (!RtComposite.enabled() || RtComposite.frameCounter()<100) throw new IllegalStateException("RT frames missing");
             if (Boolean.getBoolean("gysf.smoke.vooxxy") && (!VoxyCompat.enabled() || maxMeshes==0 || maxRtSections==0)) throw new IllegalStateException("External ray-traced LOD geometry missing");
@@ -216,5 +235,15 @@ public final class GysfSmokeClient implements ClientModInitializer {
             finished=true;
             client.disconnectWithSavingScreen();
         }
+    }
+
+    private void waterCapture(Minecraft client,String name) {
+        System.out.println("GYSF_WATER_MATRIX: "+name+" waves="+CausticaConfig.Rt.Composite.WATER_WAVES.value()
+                +" bounces="+CausticaConfig.Rt.Composite.MAX_BOUNCES.value()+" denoiser="+CausticaConfig.Rt.Composite.DENOISER.value()
+                +" hidden="+Boolean.getBoolean("gysf.voxy.hideTextured"));
+        Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(), image->{
+            try {Files.createDirectories(Path.of("screenshots"));image.writeToFile(Path.of("screenshots","gysf-water-"+name+".png"));}
+            catch(Exception e){throw new RuntimeException(e);}finally{image.close();}
+        });
     }
 }

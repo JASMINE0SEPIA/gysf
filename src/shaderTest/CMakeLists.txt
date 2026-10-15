@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.20)
+project(GysfShaderTests LANGUAGES CXX)
+add_executable(water_origins water_origins.cpp)
+target_compile_features(water_origins PRIVATE cxx_std_17)
+target_include_directories(water_origins PRIVATE "${CMAKE_BINARY_DIR}")

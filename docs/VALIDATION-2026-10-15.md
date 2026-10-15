@@ -344,3 +344,40 @@ optical-input changes are narrower than seamless-water or performance acceptance
 Raw records, intermediate/final screenshots and paired JARs stay in ignored
 `artifacts/2026-10-15/water/`. The production JAR excludes the smoke mod. PCL
 mods, settings and player saves remain untouched.
+
+## Underwater dark-band diagnosis
+
+The isolated `gysf.smoke.waterMatrix=true` run freezes wave speed at zero and
+records the same underwater camera with LOD hidden, waves off, 8 bounces, and
+denoising off at 8 and 2 bounces. It reloads resources but deliberately skips
+the dimension/motion route, finishing at tick 1720. No player instance is used.
+
+Hiding LOD leaves the broad dark band. More bounces reduce it. Source inspection
+finds that Pass A's unsplit TIR/pure-transmission branches use ordinary displaced
+point offsets, while split branches and Pass B use `waterWaveContinueOrigin`.
+An underwater crest can therefore restart its reflected ray above the original
+BLAS plane and hit that plane again, spending path depth on a false interface.
+Both unsplit branches now use the same wave-aware continuation origin.
+
+`scripts/Test-WaterOrigins.ps1` compiles the production Slang water module to its
+host backend, builds a small MSVC runner, and executes 2080 crest/trough,
+top/bottom and outgoing-direction cases. It checks origins against both planes
+and reproduces a positive-distance rest-plane self-hit for the old TIR offset,
+with no positive hit for the corrected origin. All 2080 cases pass. The unused
+host scene binding is opaque; no GPU scene traversal or Java math copy is used.
+This optional probe requires Slang, CMake and MSVC and is excluded from the mod.
+
+The original 157 Java tests, shader/SPIR-V, ABI and JAR checks also pass. Paired
+before/after GPU matrices complete with no Vulkan VUID, synchronization hazard,
+device loss or compositor/coverage failure; native LOD bytes return to zero.
+
+![Frozen-wave underwater view before](images/underwater-tir-before.png)
+![Same 2-bounce setting after the origin fix](images/underwater-tir-after.png)
+
+In the fixed 854x480 ROI x=520..853, y=120..244, pixels with every RGB channel
+below 20 decrease from 9768 to 129 (98.7%). With LOD hidden the corresponding
+counts are 9788 and 188. Raw 2-bounce counts decrease from 55 to 0. These are
+narrow dark-band diagnostics, not a general image-quality score or benchmark.
+Low path caps can still truncate legitimate multi-interface paths, and distant
+water-volume attenuation remains visible. The origin fix addresses false
+self-intersections without changing the bounce budget.
