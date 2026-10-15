@@ -62,6 +62,9 @@ repetition, per-face atlas identity, conditional biome tint and fluid corner
 heights. Ray and shadow traversal sample the provider's borrowed RGBA atlas,
 including cutout coverage. Both use the existing RT LOD acceleration structures
 and near-terrain readiness mask. See [TEXTURED-LOD.md](TEXTURED-LOD.md).
+Voxy's progressive BLAS handoff uses 3D overlap groups and whole-source
+readiness, including empty replacements. The DH input retains its separate
+2D coverage policy.
 
 `-Dgysf.voxy.colourProxy=true` retains the older average-colour input for controlled
 comparisons. The textured path uses block-state material profiles, not full

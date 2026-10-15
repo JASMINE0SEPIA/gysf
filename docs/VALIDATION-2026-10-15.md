@@ -127,3 +127,75 @@ universal scene or performance acceptance.
 ![Same camera with textured LOD hidden](images/textured-lod-control.png)
 
 Raw logs and screenshots stay locally under ignored `artifacts/2026-10-15/`.
+
+## Atomic 3D publication: gysf 0.2.1 and vooxxy Vulkan 5
+
+The consumer previously bypassed DH's initial 2D coarse filter but still used
+the 2D progressive eviction path. Ready geometry could therefore retire a
+different vertical layer, and changed multi-batch sources could mix old and
+new revisions. Voxy now stages complete overlapping 3D branches and switches
+them atomically, retaining empty leaves as explicit replacements. DH's input
+continues to use its own 2D policy. Hidden replacement resources remain owned
+by the build session until publication or cancellation.
+
+`check` passes 142 gysf tests plus 22 provider tests (164 total), with no
+failures/errors. The ten new transition tests include 100 shuffled completion
+orders that retain the full covered volume and never publish overlapping
+branches. Multi-batch source updates, coarsening, negative coordinates,
+vertical separation and empty replacement markers are covered. Shader/SPIR-V,
+Minecraft ABI and production JAR checks also pass.
+
+The extended joint command uses the usual 854x480, 1 spp, 2-bounce, 512-block
+settings, DLSS-RR active and OMM disabled for the SDK issue above:
+
+```powershell
+$env:JAVA_TOOL_OPTIONS='-Dcaustica.rt.omm=false -Dgysf.smoke.textureFixture=true -Dgysf.smoke.visualControl=true -Dgysf.smoke.motion=true -Dgysf.voxy.validateCoverage=true'
+$env:VK_KHRONOS_VALIDATION_VALIDATE_SYNC='true'
+.\scripts\Build-26.3.ps1 -Joint -ValidateVulkan
+```
+
+This 2900-tick route reloads resources, visits the Nether and returns, traverses
+both positive and negative X coordinates while changing height, forces an RT
+LOD refresh during movement, teleports to another quadrant, returns to the
+fixture, saves and exits. The harness verifies observed player coordinates,
+replacement activity and published partition checks, in addition to textured
+meshes, foliage coverage, atlas binding and compositor health.
+
+Final paired run (`smoke-coverage-final.log`, provider `616215e3`):
+
+| Measurement | Result |
+| --- | ---: |
+| RT frames | 5657 |
+| Peak selected source meshes, including empty coverage | 890 |
+| Peak resident RT BLAS sections | 671 |
+| Packed textured batches | 2392 |
+| Final atlas slot | 7 |
+| Converted foliage cutout quads | 160584 |
+| Completed atomic groups, including bootstrap/reuse | 2309 |
+| Groups replacing existing source geometry | 886 |
+| Validated published partitions | 176 |
+
+Observed motion spans X=-383.5..464.5 and Y=80..192. The manual refresh is
+recorded during that route. Resource reload and Nether/Overworld round trip
+complete; the final refresh is still streaming when save/shutdown cancels its
+unpublished work. There are zero Vulkan VUIDs, synchronization hazards, device
+losses, coverage/revision assertion failures, provider failures or compositor
+failures. Existing optional-DH class and Windows OSHI counter warnings remain.
+
+Visual inspection shows the fixture after the motion/teleport return. The
+same-camera control still removes the textured fixture and far terrain while
+keeping the native near-terrain path enabled. This establishes the exercised
+LOD path, publication invariants and lifecycle. It does not establish
+crack-free geometric silhouettes, matched near/far water/PBR shading, temporal
+performance or bounded long-travel VRAM. Those remain separate work.
+
+![Fixture after the extended motion route](images/coverage-motion-return.png)
+
+The first exploratory run also passes with 5635 frames, 698 replacement groups
+and 1985 partition checks. Its per-source checkpoint cadence was reduced before
+the final run: independent new sources and same-key updates use bounded/time
+checkpoints; completed topology replacements can publish immediately. The two
+runs encounter different cached terrain and are not a timing comparison.
+
+The paired JARs, SHA-256 manifest, final screenshots and raw build/runtime logs
+are retained locally in `artifacts/2026-10-15/coverage/`.

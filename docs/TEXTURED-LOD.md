@@ -18,6 +18,24 @@ compaction and per-section vanilla-ready mask. Every triangle is non-opaque to
 Vulkan so primary, reflection and shadow rays can reject ready near terrain or
 transparent texels. A 3D API 5 selection bypasses DH's X/Z-only coarse filter.
 
+Progressive publication also treats Voxy sections as aligned 3D cubes. An old
+source and all intersecting replacement sources form one handoff group. Every
+BLAS batch in that group must finish before a single checkpoint retires the old
+sources and activates their replacements. This applies to refinement,
+coarsening and same-key revision updates; different heights and unrelated
+branches can still publish independently. Empty selected leaves carry explicit
+completion markers so removed terrain does not leave an old solid fallback.
+Unpublished replacement resources remain session-owned across checkpoints and
+are destroyed if the session is cancelled. Complete Voxy sources in an
+intermediate checkpoint remain reusable after cancellation.
+
+`-Dgysf.voxy.validateCoverage=true` checks every published Voxy partition for
+overlapping cubes and mixed source revisions. Ten transition tests cover
+vertical separation, negative coordinates, eight-child replacement,
+coarsening, empty markers, multi-batch updates and 100 shuffled completion
+orders with constant covered volume. These prove publication invariants,
+not identical silhouettes at different geometric LODs.
+
 The provider retains ownership of its atlas. Borrowed descriptors are keyed by
 an epoch-specific owner, preventing Vulkan handle reuse from reviving a stale
 descriptor. They are append-only within a pipeline lifetime and cleared when
@@ -54,4 +72,8 @@ the atlas before saving and exit. The developer flag `gysf.voxy.hideTextured`
 affects only these textured LOD hits and does not disable native near terrain.
 `-Dgysf.smoke.visualControl=true` records the same comparison during the full
 resource-reload/dimension lifecycle test instead of shortening it.
+`-Dgysf.smoke.motion=true` extends the full run to 2900 world ticks, traverses
+positive/negative X at changing heights, teleports to another quadrant and
+returns. It requires observed replacement swaps and coverage checks; use it
+with `gysf.voxy.validateCoverage=true`.
 GPU and visual observations belong in the validation record.

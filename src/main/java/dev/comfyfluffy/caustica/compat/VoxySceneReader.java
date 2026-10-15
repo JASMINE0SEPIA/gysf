@@ -71,7 +71,8 @@ final class VoxySceneReader {
                         (int)oz.invoke(mesh),(int)size.invoke(mesh),1<<lod,new byte[0],new byte[0],data);
                 cached=new Cached(revision,copy); cache.put(id,cached);
             }
-            if(cached.mesh.textured().quadCount()>0) result.add(cached.mesh);
+            // Empty leaves are coverage too: they must retire previously visible solid geometry.
+            result.add(cached.mesh);
         }
         cache.keySet().retainAll(keep);
         long view=(long)atlas.invoke(scene);
