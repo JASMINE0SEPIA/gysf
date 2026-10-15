@@ -19,6 +19,7 @@
 #include "nvsdk_ngx_params_dlssg.h"
 #include "nvsdk_ngx_helpers_dlssg.h"
 #include "nvsdk_ngx_helpers_dlssg_vk.h"
+#include "rr_presets.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -367,15 +368,9 @@ NGX_SHIM_EXPORT void* ngxshim_create_dlssd(VkCommandBuffer cmd,
     }
     NVSDK_NGX_Result r = NVSDK_NGX_Result_Success;
 
-    if (renderPreset != 0) {
-        unsigned int preset = (unsigned int) renderPreset;
-        NVSDK_NGX_Parameter_SetUI(params, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_DLAA, preset);
-        NVSDK_NGX_Parameter_SetUI(params, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Quality, preset);
-        NVSDK_NGX_Parameter_SetUI(params, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Balanced, preset);
-        NVSDK_NGX_Parameter_SetUI(params, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Performance, preset);
-        NVSDK_NGX_Parameter_SetUI(params, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_UltraPerformance, preset);
-        NVSDK_NGX_Parameter_SetUI(params, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_UltraQuality, preset);
-    }
+    ngxshimApplyRrPreset((unsigned int)renderPreset,[&](const char* name,unsigned int preset) {
+        NVSDK_NGX_Parameter_SetUI(params,name,preset);
+    });
 
     NVSDK_NGX_DLSSD_Create_Params createParams;
     std::memset(&createParams, 0, sizeof(createParams));

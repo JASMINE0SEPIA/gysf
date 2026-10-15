@@ -49,3 +49,10 @@ target_link_libraries(ngxshim PRIVATE "${NGX_STATIC_LIB}" ${CMAKE_DL_LIBS})
 set_target_properties(ngxshim PROPERTIES
     OUTPUT_NAME "ngxshim")
 ngxshim_set_artifact_dirs(ngxshim)
+
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(rr_presets_test rr_presets_test.cpp)
+  target_include_directories(rr_presets_test PRIVATE "${DLSS_SDK_INCLUDE_DIR}")
+  add_test(NAME rr_presets COMMAND rr_presets_test)
+endif()

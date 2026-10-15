@@ -13,8 +13,11 @@ selection. gysf owns the ray-traced scene and the final world image.
   `0b61b96d1e4a495522ece3c1428e7e78b162c0d2`, API 5.
 - Paired consumer reference: `skayla2007/Caustica`,
   `e83674e4d1c4ca02b6321de23cebaf7bb1cc90b6`.
-- NVIDIA SDK: DLSS `v310.7.0`, source commit
-  `a291cc7d2cc642a51566f3dfd5376f635cd1b284`; vendor licensing stays separate.
+- NVIDIA SDK: DLSS `v310.9.1`, source commit
+  `374959484e79a640feaba44c93ac8cfb0a03f5b5`; vendor licensing stays separate.
+  This is the first public SDK with RR2/Preset F support. The previous 310.7.0
+  headers explicitly made F fall back to the default model. Default (0) follows
+  the runtime; D (4) explicitly selects the earlier transformer, F (6) selects RR2.
 
 Original source packages, texture namespaces and the `caustica.toml` settings
 namespace remain compatible. The Fabric mod identity and artifact name are

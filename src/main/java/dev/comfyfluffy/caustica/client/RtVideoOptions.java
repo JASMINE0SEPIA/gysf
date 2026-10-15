@@ -1012,7 +1012,7 @@ public final class RtVideoOptions {
             position -> setting.set(DLSS_QUALITY_ORDER.get(position)));
     }
 
-    private static final List<Integer> DLSS_PRESET_ORDER = List.of(0, 6);
+    private static final List<Integer> DLSS_PRESET_ORDER = List.of(0, 4, 6);
 
     private static OptionInstance<Integer> dlssPreset() {
         IntSetting setting = CausticaConfig.Rt.DlssRr.PRESET;

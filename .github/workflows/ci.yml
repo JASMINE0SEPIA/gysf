@@ -43,7 +43,7 @@ on:
         default: true
 
 env:
-  DLSS_SDK_REF: v310.7.0
+  DLSS_SDK_REF: v310.9.1
   DLSS_SDK_PATH: third_party/DLSS
   FFX_SDK_REF: v1.1.4
   FFX_SDK_PATH: third_party/FidelityFX-SDK
@@ -163,6 +163,9 @@ jobs:
       - name: Build NGX shim
         shell: pwsh
         run: cmake --build build/cmake/ngx_shim --config Release
+      - name: Test NGX preset transitions
+        shell: pwsh
+        run: ctest --test-dir build/cmake/ngx_shim -C Release --output-on-failure
       - name: Upload Windows NGX shim
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -280,6 +283,8 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
       - name: Build NGX shim
         run: cmake --build build/cmake/ngx_shim --config Release
+      - name: Test NGX preset transitions
+        run: ctest --test-dir build/cmake/ngx_shim -C Release --output-on-failure
       - name: Upload Linux NGX shim
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
