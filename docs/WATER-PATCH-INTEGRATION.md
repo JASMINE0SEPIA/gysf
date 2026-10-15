@@ -146,6 +146,18 @@ rebuilds include the flags. The record retains that failed attempt.
    covered-water fixtures, edits/reloads/dimensions and real memory/frame-time
    qualification. Only then rebuild and replace the playable JARs.
 
+Ownership must still identify the represented fluid cell. Currently
+`world.rahit.slang` queries the rest-triangle hit minus the outward ownership
+normal times 0.01. A future procedural hit reports the displaced wave position;
+that position can cross a 16-block section boundary into confirmed-empty air.
+The small normal offset would then query the wrong section. Preserve a separate
+rest-surface ownership position, derived from the primitive's affine rest plane
+at the reported XZ (or explicit source provenance), independently of displaced
+optical position and wave shading normal. This is an integration requirement,
+not evidence that the current rest-triangle path has this new failure. Include
+crests and troughs crossing a section boundary, with independently ready water
+and air sections, in the near/LOD primary and shadow controls.
+
 The PCL deployment is a separate, explicitly requested action: the known
 0.6.2/Vulkan.8 pair was hash-verified and copied into the renamed `26.3`
 instance. The prior Voxy/Sodium/Sulkan JARs were backed up, 14 unrelated mods

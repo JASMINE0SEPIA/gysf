@@ -19,6 +19,7 @@ import java.nio.file.*;
 /** Automatic Vulkan scene check in an isolated development world. */
 public final class GysfSmokeClient implements ClientModInitializer {
     private static final boolean CLEAN_WATER=Boolean.getBoolean("gysf.smoke.cleanWater");
+    private static final boolean PERFORMANCE=Boolean.getBoolean("gysf.smoke.performance");
     private static final String WORLD=CLEAN_WATER?"gysf-clean-water-26.3":"gysf-26.3-smoke";
     private static final boolean TEXTURE_FIXTURE=Boolean.getBoolean("gysf.smoke.textureFixture");
     private static final boolean WATER_MATRIX=Boolean.getBoolean("gysf.smoke.waterMatrix");
@@ -66,9 +67,16 @@ public final class GysfSmokeClient implements ClientModInitializer {
         if (!opened && client.gui.screen() instanceof TitleScreen && ticks>40) {
             opened=true;
             client.options.pauseOnLostFocus=false;
-            client.options.renderDistance().set(WATER_NEAR_REFERENCE?12:4);
+            client.options.renderDistance().set(Integer.getInteger("gysf.smoke.renderDistance",PERFORMANCE?32:WATER_NEAR_REFERENCE?12:4));
             client.options.fov().set(70);
-            client.getWindow().setWindowed(854,480);
+            client.getWindow().setWindowed(Integer.getInteger("gysf.smoke.width",PERFORMANCE?1792:854),
+                    Integer.getInteger("gysf.smoke.height",PERFORMANCE?1120:480));
+            if(PERFORMANCE) {
+                client.options.enableVsync().set(false);
+                client.options.framerateLimit().set(260);
+                client.options.inactivityFpsLimit().set(net.minecraft.client.InactivityFpsLimit.MINIMIZED);
+                client.options.simulationDistance().set(24);
+            }
             var flows=client.createWorldOpenFlows();
             if (Files.exists(Path.of("saves",WORLD,"level.dat"))) flows.openWorld(WORLD,()->{throw new IllegalStateException("World open cancelled");});
             else flows.createFreshLevel(WORLD,new LevelSettings("gysf isolated Vulkan smoke",GameType.CREATIVE,
@@ -78,6 +86,10 @@ public final class GysfSmokeClient implements ClientModInitializer {
         }
         if (client.level==null || client.player==null) return;
         worldTicks++;
+        if(PERFORMANCE) {
+            if(PerformanceCapture.tick(client,worldTicks)) { finished=true;client.disconnectWithSavingScreen(); }
+            return;
+        }
         if (MOTION && worldTicks>=1750 && worldTicks<=2300) {
             motionMinX=Math.min(motionMinX,client.player.getX()); motionMaxX=Math.max(motionMaxX,client.player.getX());
             motionMinY=Math.min(motionMinY,client.player.getY()); motionMaxY=Math.max(motionMaxY,client.player.getY());

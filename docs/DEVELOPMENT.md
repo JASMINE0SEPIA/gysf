@@ -161,3 +161,6 @@ GPU rendering and visual validation.
 The paired provider is [vooxxy](https://github.com/JASMINE0SEPIA/vooxxy), branch
 `jasmine/26.3-vulkan`. Local GPU evidence and its limits are recorded in
 [VALIDATION-2026-10-15.md](VALIDATION-2026-10-15.md).
+The subsequent player-reported memory and DLSS investigation, including rejected
+performance captures and the 0.7 recovery changes, is recorded separately in
+[PERFORMANCE-2026-10-15.md](PERFORMANCE-2026-10-15.md).
