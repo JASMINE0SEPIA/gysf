@@ -540,3 +540,99 @@ fluid/ceiling occlusion parity, flowing shoreline fixtures, resource-pack
 variants and temporal transition acceptance remain separate work. Raw records
 and paired artifacts are kept in `artifacts/2026-10-15/fluid-api6/`. PCL mods,
 configuration and player saves remain untouched.
+
+## Real-shape fluid interfaces: provider Vulkan 8
+
+The isolated `gysf.smoke.fluidTopology=true` fixture freezes the integrated
+server while placing known fluid levels, open/solid shores, stone/glass/slab
+ceilings, two glass-wall orientations, a fluid column, a waterlogged slab and a
+flow surface across 32-voxel section boundaries. All sample water cells are at
+Y=127, so the ceiling reads also cross a provider section boundary. It verifies
+the client received every placed state, then invokes the actual near
+`RtFluidMesher` with immutable snapshots and captures its emitted vertices.
+The far side comes from real provider export, consumer reflection and production
+RT corner conversion. Face presence and vertex sets are compared with a
+0.00002-block tolerance; missing level-zero source sections are failures.
+
+The Vulkan 7 diagnostic finds 10 mismatches in 18 comparisons: six extra water
+interfaces and four covered-rim top surfaces with up to 0.1111145-block height
+error. It deliberately allows mismatches to record them; its general runtime
+PASS is not topology acceptance. Ordinary flow, an open shore, a solid shore
+and the cross-section flow sample already agree within UNORM16/FP32 precision.
+
+Vulkan 8's external generator now follows the near RT path's real neighbor-shape
+and self-face rules. Covered fluid cells report full height, including under a
+bottom slab, so adjacent corner averaging rises to the correct ceiling edge.
+Glass and solid shapes suppress the corresponding false interfaces. The shape
+context reads retained Voxy grid data and captured dimension height bounds;
+workers never read a live client world. The standalone raster generator keeps
+its prior policy. This is an API 6 provider change; gysf's production 0.5.0 code
+and the packed quad ABI are unchanged.
+
+All 36 provider Java tests pass, including full/empty shapes on every face,
+top/bottom slab direction, partial-height side occlusion and corner ownership.
+The pinned `bfe86787` provider completes a strict static topology run with all
+18 comparisons matching, no extra faces, and maximum vertex error
+0.0000076293945 blocks. It renders 18 matched faces where the Vulkan 7 control
+had 24. Vulkan/synchronization validation is clean and native LOD allocation
+returns to zero at exit. Raw records are under
+`artifacts/2026-10-15/fluid-topology/`; no PCL files or player saves are used.
+
+A second diagnostic first passes the same 18 static samples, then places a
+glass ceiling at (63,128,63). With the original six-face invalidation policy,
+three water cells across mixed X/Y/Z section boundaries retain old exported
+vertices despite correct client states: (64,127,63), (63,127,64), (64,127,64).
+Their maximum error reaches 0.6111069 blocks in this artificial flow fixture.
+The runtime completes cleanly, but its allowed three geometry mismatches are
+evidence of a stale dependency bug, not acceptance.
+
+The external session now coalesces changed source keys on its selection worker
+and invalidates the complete 3x3x3 section neighborhood at that same LOD. Two
+additional tests cover the observed corner dependency and negative coordinates
+at every supported level, bringing the provider suite to 38 passing tests.
+
+The final `0e4365e1` provider passes the extended 1550-tick strict run. Its three
+phases compare 18 initial samples, 21 after adding the diagonal ceiling, and 21
+after restoring air. All 60 sample comparisons and 67 face comparisons match,
+with maximum vertex error 0.0000076293945 blocks. The client verifies all placed
+states in every phase. No allowed-mismatch flag is set. The run completes 3495
+RT frames, 482 replacement swaps and 138 validated partitions; native LOD memory
+peaks at 328362432 bytes and returns to zero. There are no Vulkan findings,
+compositor/coverage failures or allocation deferrals. These are controlled
+level-zero geometry results, not coarse-LOD, physics, resource-pack or temporal
+image-quality acceptance.
+
+The final 2900-tick joint run also enables the static topology fixture and the
+existing lifecycle/motion/driver-budget/pressure assertions. It uses the same
+4-bounce, 854x480, 1 spp, DLSS-RR setup with OMM disabled for the SDK checker.
+
+| Final Vulkan 8 joint run | Result |
+| --- | ---: |
+| RT frames | 7211 |
+| Peak selected sources / resident RT LOD sections | 1351 / 922 |
+| Textured batches / cumulative water / precise-fluid quads | 3154 / 725606 / 823610 |
+| Replacement groups / validated partitions | 886 / 171 |
+| Native LOD peak / shutdown bytes | 301126464 / 0 |
+| Deliberate allocation deferrals / reductions / recoveries | 5 / 2 / 3 |
+| Client ticks retaining fallback during forced pressure | 199 |
+
+The 18-sample geometry probe still matches before reload. The temporary provider
+limit recovers fully before reload, and resource reload, Nether/Overworld,
+manual refresh, motion X=-383.5..464.5 / Y=80..192, save and shutdown complete
+without Vulkan findings or compositor/coverage failures. These counts describe
+completed work, not a performance comparison with earlier processes.
+
+The topology fixture deliberately adds suspended quartz, slab and glass shapes
+above the pool. Its screenshots include those structures, their shadows and
+reflections; they cannot be compared to the earlier clean-pool dark-band ROI or
+used as universal seamless-water image acceptance. Different coarse geometry,
+resource packs, normal fluid simulation and longer temporal routes remain open.
+
+The same final provider source passes its standalone Sodium 0.9.3-alpha.1
+Vulkan lifecycle/synchronization run: 38,303 block-state round trips, live edits,
+renderer disable/control/rebuild, window/FOV/distance changes, resource reload,
+Nether return, save and shutdown. All Voxy GPU wrappers are released with no
+Vulkan findings. The paired development package keeps the unchanged gysf 0.5.0
+JAR and `voxy-vulkan-0.2.20-26.3-vulkan.8-dev-0e4365e.jar`, with source pins,
+hashes, Java-suite summary and both diagnostic and strict raw logs. No smoke
+classes are shipped in either mod JAR.

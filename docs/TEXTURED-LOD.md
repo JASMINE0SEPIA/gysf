@@ -139,3 +139,16 @@ and verifies the actual RT vertices for a known level-zero still-water cell.
 checks instead of the newest sibling build.
 `-Dgysf.smoke.expectLegacyFluids=true` requires the precise-fluid conversion
 counter to remain zero in that compatibility run.
+
+`-Dgysf.smoke.fluidTopology=true` adds frozen flow/shoreline and glass/solid/slab
+ceiling fixtures at Y=127. It compares actual near-fluid tessellation with
+exported level-zero RT vertices and face presence; all fixture states must be
+received by the client before comparison. Use it with `waterCompareOnly` to
+separate geometry acceptance from scene reload. The diagnostic-only flag
+`gysf.smoke.topologyAllowMismatch=true` logs differences instead of failing;
+such a runtime PASS is not topology acceptance.
+`-Dgysf.smoke.fluidTopologyEdits=true` also changes a ceiling across X/Y/Z provider
+boundaries and repeats the comparison after both addition and removal. This
+1550-tick mode keeps its isolated world frozen until tick 1540 and explicitly
+skips dimension changes. It requires the topology comparison mode and tests
+dependency invalidation rather than just initial construction.

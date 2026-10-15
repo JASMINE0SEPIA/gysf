@@ -80,8 +80,12 @@ gysf 0.5.0 optionally consumes API 6 UNORM16 fluid corner heights while retainin
 API 5 geometry fallback. The paired Vulkan.7 provider exports these values only
 for external rendering and includes them in CPU cache payload accounting.
 This addresses the 8/9-to-7/8 still-water loss without changing raster quad bits.
-Coarse voxel aggregation, fluid/ceiling occlusion parity and detail selection
-still need broader geometric acceptance.
+Provider Vulkan.8 also matches RT fluid heights and real-shape interface culling
+under solid, glass and slab ceilings, and invalidates diagonal fluid dependencies
+after edits. The isolated flow/shoreline/covered-water geometry fixture compares
+actual near and exported RT vertices before and after adding/removing a ceiling.
+Coarse voxel aggregation, resource-pack variants and detail selection still
+need broader geometric acceptance.
 
 The external provider starts with a 1024-block selection cap; the smoke run uses
 512 blocks. `-Dvoxy.external.maxDistanceBlocks=<512..10000>` selects a development

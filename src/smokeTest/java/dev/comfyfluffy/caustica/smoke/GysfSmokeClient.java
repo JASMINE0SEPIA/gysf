@@ -27,6 +27,8 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private static final boolean WATER_FIXTURE=WATER_MATRIX || WATER_COMPARE || Boolean.getBoolean("gysf.smoke.waterFixture");
     private static final boolean MOTION=Boolean.getBoolean("gysf.smoke.motion");
     private static final boolean MEMORY_PRESSURE=Boolean.getBoolean("gysf.smoke.memoryPressure");
+    private static final boolean FLUID_TOPOLOGY=Boolean.getBoolean("gysf.smoke.fluidTopology");
+    private static final boolean FLUID_TOPOLOGY_EDITS=Boolean.getBoolean("gysf.smoke.fluidTopologyEdits");
     private static final boolean VISUAL_ONLY=TEXTURE_FIXTURE && Boolean.getBoolean("gysf.smoke.visualOnly");
     private static final boolean VISUAL_CONTROL=TEXTURE_FIXTURE && (VISUAL_ONLY || Boolean.getBoolean("gysf.smoke.visualControl"));
     private int ticks,worldTicks,maxMeshes,maxRtSections;
@@ -43,6 +45,9 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private boolean observedReducedProvider;
     private java.util.concurrent.CompletableFuture<Void> reload;
     private java.util.concurrent.CompletableFuture<Boolean> waterFixtureReady;
+    private java.util.concurrent.CompletableFuture<?> fluidTopologyReady;
+    private java.util.concurrent.CompletableFuture<?> fluidTopologyEditReady;
+    private java.util.concurrent.CompletableFuture<?> fluidTopologyRestoreReady;
     @Override public void onInitializeClient() { ClientTickEvents.END_CLIENT_TICK.register(this::tick); }
     private void tick(Minecraft client) {
         ticks++;
@@ -132,6 +137,11 @@ public final class GysfSmokeClient implements ClientModInitializer {
             client.player.connection.sendCommand(WATER_FIXTURE ? "tp @s 64 140 0 0 16" : TEXTURE_FIXTURE ? "tp @s 0 140 0 0 16" : "tp @s 0 140 0 0 20");
             if(TEXTURE_FIXTURE || WATER_FIXTURE) client.options.fov().set(30);
         }
+        if(worldTicks==350 && FLUID_TOPOLOGY) {
+            var server=client.getSingleplayerServer();
+            if(server==null) throw new IllegalStateException("Topology fixture needs isolated integrated server");
+            fluidTopologyReady=server.submit(()->dev.comfyfluffy.caustica.rt.terrain.FluidTopologySmokeProbe.place(server));
+        }
         if (worldTicks==890 && TEXTURE_FIXTURE) {
             System.out.println("GYSF_SMOKE: fixture near-ready="+
                     dev.comfyfluffy.caustica.rt.terrain.RtTerrain.isSectionReady(new net.minecraft.core.BlockPos(0,112,100)));
@@ -160,9 +170,33 @@ public final class GysfSmokeClient implements ClientModInitializer {
             System.out.println("GYSF_SMOKE: water near-ready="+near+" far-ready="+far);
             System.out.println("GYSF_SMOKE: water lane near-ready="+ready+"/129");
             dev.comfyfluffy.caustica.rt.terrain.FluidHeightSmokeProbe.verify(Boolean.getBoolean("gysf.smoke.requirePreciseFluids"));
+            if(FLUID_TOPOLOGY) {
+                if(fluidTopologyReady==null || !fluidTopologyReady.isDone()) throw new IllegalStateException("Topology fixture incomplete");
+                fluidTopologyReady.join();
+                dev.comfyfluffy.caustica.rt.terrain.FluidTopologySmokeProbe.verify(client,Boolean.getBoolean("gysf.smoke.topologyAllowMismatch"));
+            }
         }
         if (worldTicks==900) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                 image->{try {Files.createDirectories(Path.of("screenshots"));image.writeToFile(Path.of("screenshots","gysf-joint.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
+        if(worldTicks==950 && FLUID_TOPOLOGY_EDITS) {
+            if(!FLUID_TOPOLOGY || !WATER_COMPARE) throw new IllegalStateException("Topology edits need the isolated topology comparison mode");
+            var server=client.getSingleplayerServer();
+            fluidTopologyEditReady=server.submit(()->dev.comfyfluffy.caustica.rt.terrain.FluidTopologySmokeProbe.editDiagonalCeiling(server));
+        }
+        if(worldTicks==1200 && FLUID_TOPOLOGY_EDITS) {
+            if(fluidTopologyEditReady==null || !fluidTopologyEditReady.isDone()) throw new IllegalStateException("Topology edit incomplete");
+            fluidTopologyEditReady.join();
+            dev.comfyfluffy.caustica.rt.terrain.FluidTopologySmokeProbe.verify(client,Boolean.getBoolean("gysf.smoke.topologyAllowMismatch"));
+        }
+        if(worldTicks==1220 && FLUID_TOPOLOGY_EDITS) {
+            var server=client.getSingleplayerServer();
+            fluidTopologyRestoreReady=server.submit(()->dev.comfyfluffy.caustica.rt.terrain.FluidTopologySmokeProbe.restoreDiagonalCeiling(server));
+        }
+        if(worldTicks==1500 && FLUID_TOPOLOGY_EDITS) {
+            if(fluidTopologyRestoreReady==null || !fluidTopologyRestoreReady.isDone()) throw new IllegalStateException("Topology restoration incomplete");
+            fluidTopologyRestoreReady.join();
+            dev.comfyfluffy.caustica.rt.terrain.FluidTopologySmokeProbe.verify(client,Boolean.getBoolean("gysf.smoke.topologyAllowMismatch"));
+        }
         if (VISUAL_CONTROL && worldTicks==920) System.setProperty("gysf.voxy.hideTextured","true");
         if (VISUAL_CONTROL && worldTicks==950) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                 image->{try {image.writeToFile(Path.of("screenshots","gysf-no-textured-control.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
@@ -194,10 +228,11 @@ public final class GysfSmokeClient implements ClientModInitializer {
             if(worldTicks==1680) waterCapture(client,"raw-two");
             if(worldTicks==1685) { CausticaConfig.Rt.Composite.DENOISER.set(true); CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(1f); }
         }
-        if (WATER_FIXTURE && worldTicks==1280) client.player.connection.sendCommand("forceload remove 32 0 96 160");
+        if (WATER_FIXTURE && worldTicks==(FLUID_TOPOLOGY_EDITS?1540:1280)) client.player.connection.sendCommand("forceload remove 32 0 96 160");
+        if(FLUID_TOPOLOGY && worldTicks==(FLUID_TOPOLOGY_EDITS?1540:1280)) client.getSingleplayerServer().submit(()->client.getSingleplayerServer().tickRateManager().setFrozen(false));
         if (STATIC_WATER && !WATER_MATRIX && worldTicks==1280) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(1f);
-        if (!WATER_MATRIX && worldTicks==1350) client.player.connection.sendCommand("execute in minecraft:the_nether run tp @s 0 90 0");
-        if (!WATER_MATRIX && worldTicks==1650) client.player.connection.sendCommand("execute in minecraft:overworld run tp @s 0 140 0");
+        if (!WATER_MATRIX && !WATER_COMPARE && worldTicks==1350) client.player.connection.sendCommand("execute in minecraft:the_nether run tp @s 0 90 0");
+        if (!WATER_MATRIX && !WATER_COMPARE && worldTicks==1650) client.player.connection.sendCommand("execute in minecraft:overworld run tp @s 0 140 0");
         if (MOTION && worldTicks>=1750 && worldTicks<=2050 && worldTicks%10==0) {
             int step=(worldTicks-1750)/10;
             client.player.connection.sendCommand("tp @s "+(-256+step*24)+" "+(80+(step%8)*16)+" -128 0 20");
@@ -208,7 +243,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
         if (MOTION && worldTicks==2300) client.player.connection.sendCommand("tp @s 0 140 0 0 16");
         if (MOTION && worldTicks==2800) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                 image->{try {image.writeToFile(Path.of("screenshots","gysf-motion-return.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
-        if (worldTicks==(WATER_COMPARE?1290:WATER_MATRIX?1720:VISUAL_ONLY?990:MOTION?2900:2200)) {
+        if (worldTicks==(WATER_COMPARE?(FLUID_TOPOLOGY_EDITS?1550:1290):WATER_MATRIX?1720:VISUAL_ONLY?990:MOTION?2900:2200)) {
             if(!VISUAL_ONLY && !WATER_COMPARE) {
                 if (reload==null || !reload.isDone()) throw new IllegalStateException("Resource reload incomplete");
                 reload.join();
