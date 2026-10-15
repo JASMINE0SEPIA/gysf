@@ -679,3 +679,50 @@ score. The production origin probe still passes all 2080 cases and its old-TIR
 self-hit negative control. Shader/SPIR-V, Minecraft ABI and JAR checks pass.
 These changes affect gysf only; provider Vulkan 8 remains the pinned
 `0e4365e1` artifact. Raw controls are in `artifacts/2026-10-15/water-normals/`.
+
+The in-game geometry probe now reads actual near-fluid primitive normal records
+through smoke-only reflection and compares them with the exported RT geometry.
+An initial harness run rejects ten side triangles because near and Voxy use
+different diagonals on the same vertical plane. The verifier now accepts an
+alternative diagonal only when all four corners are coplanar within the existing
+position tolerance; non-planar tops still require matching triangle vertices.
+This corrects the verifier without removing the normal comparison or changing
+the production fix. The failed harness log is retained separately.
+
+The strict rerun has no allowed-mismatch flag. Across initial/add/restore phases
+it passes 60 sample, 67 face and 134 triangle-normal comparisons. Maximum vertex
+error is 0.0000076293945 blocks; maximum matched normal-component error is
+0.000013224781, below the 0.0001 normal tolerance. These are CPU primitive records
+from the real in-game production capture, not GPU buffer readback or an image
+metric. The run also completes 1550 ticks with clean Vulkan validation and zero
+native LOD bytes at shutdown.
+
+The full 2900-tick run explicitly sets and retains wave strength 4 with speed 1,
+keeps animation active, and combines the real normal/topology probe with the
+existing reload, dimension, motion, coverage and driver-budget pressure checks.
+It uses 854x480, 1 spp, 4 bounces and DLSS-RR, with OMM off for the SDK checker.
+
+| Final maximum-height run | Result |
+| --- | ---: |
+| RT frames | 6197 |
+| Peak selected sources / resident RT LOD sections | 1350 / 922 |
+| Textured batches / cumulative water / precise-fluid quads | 2624 / 554308 / 661223 |
+| Replacement groups / validated partitions | 368 / 143 |
+| Native LOD peak / shutdown bytes | 291400464 / 0 |
+| Deliberate deferrals / distance reductions / recoveries | 5 / 2 / 3 |
+| Client ticks retaining fallback during pressure | 198 |
+
+The probe still matches all initial sample normals and vertices at maximum wave
+strength. Resource reload, Nether/Overworld return, manual RT refresh, movement
+X=-383.5..464.5 / Y=80..192, save and shutdown finish without Vulkan findings or
+compositor/coverage failures. The provider distance fully recovers before
+reload. These are completed-work counters, not a performance comparison.
+
+The host probe additionally checks an analytic upper envelope of all authored
+wave components against the reference search bound. It uses the fact that the
+crest exponential and each LOD weight are at most one; slider strength scales
+the field and envelope equally. The 6338 sampled cases still pass, with the
+same reported maxima. This numerical evidence does not establish exact shoreline
+clipping, arbitrary grazing intersections or temporal image fidelity for the
+raygen displacement proxy. The shaderTest/smoke classes are excluded from the
+production JAR. PCL files and player saves remain untouched.

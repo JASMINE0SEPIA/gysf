@@ -8,6 +8,14 @@ RWStructuredBuffer<uint> result;
 void waterSurfaceProbe(uint3 id : SV_DispatchThreadID) {
     uint zeroFailures=0, normalFailures=0, heightFailures=0, anchorFailures=0, cases=0;
     float worstNormal=0.0, worstHeight=0.0;
+    // exp(S*(sin(phi)-1)) and each LOD weight are <= 1: this is an analytic envelope,
+    // independent of the sampled phases below. The height slider scales both sides equally.
+    float envelope=0.0,lambda=WAVE_LAMBDA0;
+    for(int i=0;i<WAVE_COUNT;i++) {
+        envelope+=WAVE_Q[i]*lambda/6.28318530718;
+        lambda/=WAVE_LAMBDA_RATIO;
+    }
+    if(envelope*WATER_WAVE_STRENGTH>WAVE_MAX_HEIGHT) heightFailures++;
     worldPush.waterAnchor=float4(0.0);
     worldPush.waterOpacity=float4(1.0,0.0,1.0,7.0);
     for(int side=0;side<2;side++) for(int x=-4;x<=4;x++) for(int z=-4;z<=4;z++) {

@@ -104,6 +104,14 @@ public final class GysfSmokeClient implements ClientModInitializer {
         }
         if (worldTicks==80) { client.player.connection.sendCommand("gamemode spectator"); client.player.connection.sendCommand("tp @s 0 140 0 0 20"); client.player.connection.sendCommand("time set noon"); }
         if (worldTicks==80 && STATIC_WATER) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(0f);
+        if(worldTicks==80 && System.getProperty("gysf.smoke.waveStrength")!=null) {
+            float strength=Float.parseFloat(System.getProperty("gysf.smoke.waveStrength"));
+            if(!Float.isFinite(strength) || strength<0 || strength>4) throw new IllegalStateException("Invalid smoke wave strength");
+            CausticaConfig.Rt.Composite.WATER_WAVES.set(true);
+            CausticaConfig.Rt.Composite.WATER_WAVE_STRENGTH.set(strength);
+            if(!STATIC_WATER) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(1f);
+            System.out.println("GYSF_SMOKE: water waves strength="+strength+" speed="+CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.value());
+        }
         if (worldTicks==250) {
             if(WATER_FIXTURE) client.player.connection.sendCommand("forceload add 32 0 96 160");
             client.player.connection.sendCommand(WATER_FIXTURE ? "tp @s 64 116 128 180 5" : TEXTURE_FIXTURE
@@ -250,6 +258,9 @@ public final class GysfSmokeClient implements ClientModInitializer {
                 if (!WATER_MATRIX && (!visitedNether || !returnedOverworld)) throw new IllegalStateException("Dimension round trip incomplete");
             }
             if (!RtComposite.enabled() || RtComposite.frameCounter()<100) throw new IllegalStateException("RT frames missing");
+            if(System.getProperty("gysf.smoke.waveStrength")!=null && (!CausticaConfig.Rt.Composite.WATER_WAVES.value()
+                    || CausticaConfig.Rt.Composite.WATER_WAVE_STRENGTH.value()!=Float.parseFloat(System.getProperty("gysf.smoke.waveStrength"))))
+                throw new IllegalStateException("Requested smoke wave strength was not retained");
             if (Boolean.getBoolean("gysf.smoke.vooxxy") && (!VoxyCompat.enabled() || maxMeshes==0 || maxRtSections==0)) throw new IllegalStateException("External ray-traced LOD geometry missing");
             long textured=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.texturedBuildCount();
             long leafCutouts=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.leafCutoutQuadCount();

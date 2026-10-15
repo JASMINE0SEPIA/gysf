@@ -160,3 +160,6 @@ increment RT conversion counters. `scripts/Test-WaterSurfaces.ps1` executes the
 production Slang wave evaluator against zero-amplitude, finite-difference normal,
 surface-height residual and world-anchor controls. It is independent of the
 origin probe and of GPU/temporal image acceptance.
+`-Dgysf.smoke.waveStrength=<0..4>` explicitly sets and verifies the isolated
+run's wave-height multiplier. It enables waves and keeps speed 1 for an animated
+full run; the comparison mode still freezes its wave phase for captures.

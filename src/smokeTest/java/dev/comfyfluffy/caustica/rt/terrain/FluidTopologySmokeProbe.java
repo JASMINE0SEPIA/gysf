@@ -140,11 +140,17 @@ public final class FluidTopologySmokeProbe {
                     nearTriangle[v*3+2]=packedNear.positions()[index+2]+(p.getZ()&~15);
                 }
                 float[] matched=null;
-                for(float[] quad:far.values()) for(int t=0;t<2;t++) {
-                    int[] order=t==0?new int[]{0,1,2}:new int[]{0,2,3};
-                    float[] triangle=new float[9];
-                    for(int v=0;v<3;v++) System.arraycopy(quad,order[v]*3,triangle,v*3,3);
-                    if(vertexError(nearTriangle,triangle)<2e-5f) matched=triangle;
+                for(float[] quad:far.values()) {
+                    for(int t=0;t<2;t++) {
+                        int[] order=t==0?new int[]{0,1,2}:new int[]{0,2,3};
+                        float[] triangle=new float[9];
+                        for(int v=0;v<3;v++) System.arraycopy(quad,order[v]*3,triangle,v*3,3);
+                        if(vertexError(nearTriangle,triangle)<2e-5f) matched=triangle;
+                    }
+                    // A vertical trapezoid can have the opposite diagonal without changing its
+                    // surface. Non-planar tops still require an actual matching triangle.
+                    if(matched==null && vertexError(nearTriangle,quad)<2e-5f && coplanar(quad))
+                        matched=Arrays.copyOf(quad,9);
                 }
                 float error=Float.POSITIVE_INFINITY;
                 if(matched!=null) {
@@ -177,9 +183,17 @@ public final class FluidTopologySmokeProbe {
             System.out.println("GYSF_FLUID_TOPOLOGY: sample="+sample.name+" nearFaces="+capture.quads.keySet()+" farFaces="+new TreeSet<>(far.keySet()));
         }
         System.out.println("GYSF_FLUID_TOPOLOGY: phase="+phase+" edited="+edited+" samples="+checks.size()+" faces="+faces+" mismatches="+mismatches+" maxMatchedVertexError="+worst);
-        System.out.println("GYSF_FLUID_NORMALS: phase="+phase+" triangles="+normalTriangles+" mismatches="+normalMismatches+" maxComponentError="+worstNormal);
+        System.out.println("GYSF_FLUID_NORMALS: phase="+phase+" triangles="+normalTriangles+" mismatches="+normalMismatches+" maxMatchedComponentError="+worstNormal);
         if(!allowMismatch && (mismatches!=0 || normalMismatches!=0))
             throw new IllegalStateException("Near/LOD fluid topology/normal mismatch: "+mismatches+"/"+normalMismatches);
+    }
+
+    private static boolean coplanar(float[] p) {
+        float ax=p[3]-p[0],ay=p[4]-p[1],az=p[5]-p[2];
+        float bx=p[6]-p[0],by=p[7]-p[1],bz=p[8]-p[2];
+        float nx=ay*bz-az*by,ny=az*bx-ax*bz,nz=ax*by-ay*bx;
+        float length=(float)Math.sqrt(nx*nx+ny*ny+nz*nz);
+        return length>0 && Math.abs(nx*(p[9]-p[0])+ny*(p[10]-p[1])+nz*(p[11]-p[2]))/length<2e-5f;
     }
 
     private static RtTerrainMesher.PackedSection captureProduction(net.minecraft.client.renderer.block.BlockAndTintGetter region,
