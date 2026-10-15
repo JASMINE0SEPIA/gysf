@@ -21,6 +21,7 @@ worlds. No PCL instance, player world or installed mod was modified.
 | gysf + vooxxy, SVGF, OMM disabled | Passed | 3271 | 336 | 359 |
 | gysf + vooxxy, default DLSS-RR + OMM | Passed, SDK validation caveat below | 3674 | 336 | 357 |
 | gysf + vooxxy, default plus Nether round trip | Passed, same SDK caveat | 4561 | 336 | 359 |
+| Final paired build, DLSS-RR, OMM disabled, Nether round trip | Passed, validation clean | 4634 | 336 | 355 |
 
 These runs enter a fixed-seed world, move/teleport the camera, reload resource
 packs, save, disconnect and stop. The joint runs load no Sodium. Vulkan and
@@ -31,6 +32,11 @@ The extended default run additionally visits the Nether and returns to the
 Overworld, recreating provider/RT world resources. Development settings are
 854x480, 1 sample per pixel, 2 bounces and a 512-block external LOD cap; these
 counts establish activity, not a performance benchmark.
+The final run uses vooxxy commit `5c23b2219c3da076dd97b77cd999489f5f761edd`
+and gysf code commit `d2afadc`. DLSS-RR stays active and only OMM is disabled to
+avoid the SDK checker defect. It completes 4634 RT frames, resource reload and
+the dimension round trip with no VUID, synchronization hazard, device loss or
+provider/compositor failure. Both projects' final `check` tasks also pass.
 
 vooxxy standalone Sodium/Vulkan lifecycle regression also passed block
 placement/removal and light ingestion, 38,303 block-state persistence round trips,
