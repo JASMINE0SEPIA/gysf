@@ -20,7 +20,8 @@ import java.nio.file.*;
 public final class GysfSmokeClient implements ClientModInitializer {
     private static final boolean CLEAN_WATER=Boolean.getBoolean("gysf.smoke.cleanWater");
     private static final boolean PERFORMANCE=Boolean.getBoolean("gysf.smoke.performance");
-    private static final String WORLD=CLEAN_WATER?"gysf-clean-water-26.3":"gysf-26.3-smoke";
+    private static final String WORLD=Boolean.getBoolean("gysf.smoke.fluidMip")?"gysf-fluid-mip-26.3"
+            :CLEAN_WATER?"gysf-clean-water-26.3":"gysf-26.3-smoke";
     private static final boolean TEXTURE_FIXTURE=Boolean.getBoolean("gysf.smoke.textureFixture");
     private static final boolean WATER_MATRIX=Boolean.getBoolean("gysf.smoke.waterMatrix");
     private static final boolean WATER_COMPARE=Boolean.getBoolean("gysf.smoke.waterCompareOnly");
@@ -32,6 +33,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private static final boolean MEMORY_PRESSURE=Boolean.getBoolean("gysf.smoke.memoryPressure");
     private static final boolean FLUID_TOPOLOGY=Boolean.getBoolean("gysf.smoke.fluidTopology");
     private static final boolean FLUID_TOPOLOGY_EDITS=Boolean.getBoolean("gysf.smoke.fluidTopologyEdits");
+    private static final boolean FLUID_MIP=Boolean.getBoolean("gysf.smoke.fluidMip");
     private static final boolean VISUAL_ONLY=TEXTURE_FIXTURE && Boolean.getBoolean("gysf.smoke.visualOnly");
     private static final boolean VISUAL_CONTROL=TEXTURE_FIXTURE && (VISUAL_ONLY || Boolean.getBoolean("gysf.smoke.visualControl"));
     private int ticks,worldTicks,maxMeshes,maxRtSections;
@@ -53,9 +55,13 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private java.util.concurrent.CompletableFuture<?> fluidTopologyReady;
     private java.util.concurrent.CompletableFuture<?> fluidTopologyEditReady;
     private java.util.concurrent.CompletableFuture<?> fluidTopologyRestoreReady;
+    private java.util.concurrent.CompletableFuture<?> fluidMipReady;
     private final WaterSequenceCapture waterSequence=new WaterSequenceCapture();
     private final WaterCameraCapture waterCamera=new WaterCameraCapture();
     @Override public void onInitializeClient() {
+        if(FLUID_MIP && (!CLEAN_WATER || !WATER_COMPARE || FLUID_TOPOLOGY || FLUID_TOPOLOGY_EDITS
+                || WaterCameraCapture.ENABLED || WaterSequenceCapture.ENABLED))
+            throw new IllegalStateException("Fluid mip probe needs its own clean-water comparison run");
         if(CLEAN_WATER && (FLUID_TOPOLOGY || FLUID_TOPOLOGY_EDITS || TEXTURE_FIXTURE))
             throw new IllegalStateException("Clean-water world cannot contain topology or material fixtures");
         if(WaterCameraCapture.ENABLED && (!CLEAN_WATER || !WATER_COMPARE || WATER_MATRIX || WaterSequenceCapture.ENABLED
@@ -196,6 +202,16 @@ public final class GysfSmokeClient implements ClientModInitializer {
             var server=client.getSingleplayerServer();
             if(server==null) throw new IllegalStateException("Topology fixture needs isolated integrated server");
             fluidTopologyReady=server.submit(()->dev.comfyfluffy.caustica.rt.terrain.FluidTopologySmokeProbe.place(server));
+        }
+        if(worldTicks==350 && FLUID_MIP) {
+            var server=client.getSingleplayerServer();
+            if(server==null) throw new IllegalStateException("Fluid mip fixture needs isolated integrated server");
+            fluidMipReady=server.submit(()->dev.comfyfluffy.caustica.rt.terrain.FluidMipSmokeProbe.place(server));
+        }
+        if(worldTicks==1200 && FLUID_MIP) {
+            if(fluidMipReady==null || !fluidMipReady.isDone()) throw new IllegalStateException("Fluid mip fixture incomplete");
+            fluidMipReady.join();
+            dev.comfyfluffy.caustica.rt.terrain.FluidMipSmokeProbe.verify(client);
         }
         if (worldTicks==890 && TEXTURE_FIXTURE) {
             System.out.println("GYSF_SMOKE: fixture near-ready="+
