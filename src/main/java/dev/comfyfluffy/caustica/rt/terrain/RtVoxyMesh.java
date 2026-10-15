@@ -13,6 +13,7 @@ final class RtVoxyMesh {
     static final AtomicLong PACKED_BATCHES=new AtomicLong();
     static final AtomicLong LEAF_CUTOUT_QUADS=new AtomicLong();
     static final AtomicLong WATER_QUADS=new AtomicLong();
+    static final AtomicLong PRECISE_FLUID_QUADS=new AtomicLong();
     record Slice(DistantHorizonsCompat.LodMesh mesh,int start,int end) {}
     private RtVoxyMesh() {}
 
@@ -37,7 +38,7 @@ final class RtVoxyMesh {
         float[] positions=new float[Math.multiplyExact(count,12)];
         int[] indices=new int[Math.multiplyExact(count,6)];
         float[] uvs=new float[Math.multiplyExact(count,12)], prims=new float[Math.multiplyExact(count,24)];
-        int nextOrdinary=0,nextWater=ordinary,leafCutouts=0;
+        int nextOrdinary=0,nextWater=ordinary,leafCutouts=0,preciseFluids=0;
         float[] p=new float[12],uv=new float[8];
         for(var slice:slices) {
             var source=slice.mesh;
@@ -47,7 +48,9 @@ final class RtVoxyMesh {
                 int face=(int)raw&7,modelId=(int)(raw>>>26)&65535;
                 var model=mesh.model(modelId);
                 int data=model.face(face),scale=1<<mesh.level();
-                corners(raw,data,model.fluid(),scale,p,uv);
+                long precise=mesh.fluidHeights(i);
+                corners(raw,data,model.fluid(),scale,p,uv,precise);
+                if(model.fluid() && precise!=0) preciseFluids++;
                 int q=model.water()?nextWater++:nextOrdinary++;
                 int vertex=q*4;
                 for(int v=0;v<4;v++) {
@@ -94,12 +97,17 @@ final class RtVoxyMesh {
         PACKED_BATCHES.incrementAndGet();
         LEAF_CUTOUT_QUADS.addAndGet(leafCutouts);
         WATER_QUADS.addAndGet(waterCount);
+        PRECISE_FLUID_QUADS.addAndGet(preciseFluids);
         // Every LOD face traverses any-hit, including solid faces, for the vanilla-ready ownership mask.
         return new RtTerrainMesher.PackedSection(positions,indices,uvs,prims,
                 new int[]{0,ordinary*2,0,waterCount*2},new int[]{0,0,ordinary*2,ordinary*2},new float[0]);
     }
 
     static void corners(long raw,int data,boolean fluid,int scale,float[] p,float[] uv) {
+        corners(raw,data,fluid,scale,p,uv,0);
+    }
+
+    static void corners(long raw,int data,boolean fluid,int scale,float[] p,float[] uv,long precise) {
         int face=(int)raw&7,axis=face>>1;
         if(face>5) throw new IllegalArgumentException("Voxy face outside 0..5");
         int au=axis==2?1:0,av=axis==0?2:axis==1?1:2,an=axis==0?1:axis==1?2:0;
@@ -124,7 +132,11 @@ final class RtVoxyMesh {
                 if(face==1) corner=(a<<1)|b;
                 else if(axis==1 && b==1) corner=(a<<1)|(face&1);
                 else if(axis==2 && a==1) corner=((face&1)<<1)|b;
-                if(corner>=0) p[j*3+1]+=((((heights>>>(corner*3))&7)+1)/8f-1)*scale;
+                if(corner>=0) {
+                    float heightValue=precise!=0?((precise>>>(corner*16))&65535L)/65535f:
+                            (((heights>>>(corner*3))&7)+1)/8f;
+                    p[j*3+1]+=(heightValue-1)*scale;
+                }
             }
         }
     }

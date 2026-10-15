@@ -72,6 +72,16 @@ height of 8/9 therefore becomes 7/8; its world-space error grows with voxel
 scale. More precise heights and refraction-aware detail selection are separate
 geometry work, not something to conceal with a different water shader.
 
+With API 6, the optional `fluidHeights()` sidecar replaces only the RT consumer's
+corner values with four UNORM16 lanes in `(x<<1)|z` order. The unchanged API 5
+quad bits still provide fallback when that method or a quad's precision data is
+absent. The reader validates array alignment and copies the data into owned
+snapshots; workers do not query the provider. Original fractional face geometry,
+UVs, normals and near-ready face ownership retain their existing roles.
+`-Dgysf.voxy.legacyFluidHeights=true` selects the old geometry at startup for
+controls. This removes most corner quantization loss but cannot reconstruct
+detail erased by coarse source voxels or unvisited terrain.
+
 The decoding and atlas-layout reference is `skayla2007/Caustica` at
 `e83674e4d1c4ca02b6321de23cebaf7bb1cc90b6` (`RtVoxyMesh`, `voxy.slang`), adapted
 to the 26.3 renderer and existing scheduler. Fluid packing follows vooxxy's
@@ -123,3 +133,7 @@ near-ready count and requires its far sample to remain LOD-owned.
 through the host backend, checking 2080 displaced/rest-plane cases and a
 total-internal-reflection self-hit negative control. It is separate from the
 Java/shader/ABI/JAR checks and the Vulkan scene tests.
+`-Dgysf.smoke.requirePreciseFluids=true` also requires converted API 6 fluid quads
+and verifies the actual RT vertices for a known level-zero still-water cell.
+`-PvooxxySmokeJar=<path>` selects a pinned provider JAR for API 5 compatibility
+checks instead of the newest sibling build.

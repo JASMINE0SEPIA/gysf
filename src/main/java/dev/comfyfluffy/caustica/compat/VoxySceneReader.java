@@ -11,6 +11,7 @@ final class VoxySceneReader {
     private final Method poll, epoch, meshes, models, colours, atlas, quads, ox, oy, oz, size;
     private final Field key, meshRevision, level;
     private final Method[] modelValues;
+    private final Method fluidHeights;
     private Object previous, previousModels;
     private VoxySceneData.Palette palette;
     private long currentEpoch = Long.MIN_VALUE, version;
@@ -29,6 +30,10 @@ final class VoxySceneReader {
         key=mesh.getField("key"); meshRevision=mesh.getField("revision"); level=mesh.getField("level");
         quads=mesh.getMethod("quads"); ox=mesh.getMethod("originX"); oy=mesh.getMethod("originY");
         oz=mesh.getMethod("originZ"); size=mesh.getMethod("blockSize");
+        Method precision=null;
+        try { precision=mesh.getMethod("fluidHeights"); }
+        catch(NoSuchMethodException api5) { }
+        fluidHeights=precision;
         Class<?> model=Class.forName("me.cortex.voxy.api.LodModel");
         String[] names={"id","down","up","north","south","west","east","flags","tint","state"};
         modelValues=new Method[names.length];
@@ -66,7 +71,12 @@ final class VoxySceneReader {
                 LongBuffer buffer=(LongBuffer)quads.invoke(mesh);
                 long[] packed=new long[buffer.remaining()]; buffer.get(packed);
                 int lod=level.getInt(mesh);
-                var data=new VoxySceneData.Mesh(packed,palette,lod);
+                long[] precise=new long[0];
+                if(fluidHeights!=null && !Boolean.getBoolean("gysf.voxy.legacyFluidHeights")) {
+                    LongBuffer values=(LongBuffer)fluidHeights.invoke(mesh);
+                    precise=new long[values.remaining()]; values.get(precise);
+                }
+                var data=new VoxySceneData.Mesh(packed,palette,lod,precise);
                 var copy=new DistantHorizonsCompat.LodMesh(id,++version,(int)ox.invoke(mesh),(int)oy.invoke(mesh),
                         (int)oz.invoke(mesh),(int)size.invoke(mesh),1<<lod,new byte[0],new byte[0],data);
                 cached=new Cached(revision,copy); cache.put(id,cached);

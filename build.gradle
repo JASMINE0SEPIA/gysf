@@ -75,7 +75,8 @@ configurations {
 }
 dependencies {
     if (project.hasProperty('vooxxySmoke')) {
-        def providerJars = fileTree('../voxy-vulkan-26.3/build/libs') {
+        def providerOverride = findProperty('vooxxySmokeJar')
+        def providerJars = providerOverride ? [file(providerOverride)] : fileTree('../voxy-vulkan-26.3/build/libs') {
             include 'voxy-vulkan-*.jar'
             exclude '*-sources.jar'
         }.files.sort { it.lastModified() }

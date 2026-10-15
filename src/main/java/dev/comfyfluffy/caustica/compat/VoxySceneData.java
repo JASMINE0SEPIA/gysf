@@ -34,14 +34,22 @@ public final class VoxySceneData {
 
     public static final class Mesh {
         private final long[] quads;
+        private final long[] fluidHeights;
         private final Palette palette;
         private final int level;
         public Mesh(long[] quads, Palette palette, int level) {
+            this(quads,palette,level,new long[0]);
+        }
+        public Mesh(long[] quads, Palette palette, int level, long[] fluidHeights) {
             if (level < 0 || level > 4) throw new IllegalArgumentException("Voxy LOD outside 0..4");
+            if (fluidHeights.length != 0 && fluidHeights.length != quads.length)
+                throw new IllegalArgumentException("Voxy fluid heights must match quad order");
             this.quads = quads.clone(); this.palette = palette; this.level = level;
+            this.fluidHeights = fluidHeights.clone();
         }
         public int quadCount() { return quads.length; }
         public long quad(int index) { return quads[index]; }
+        public long fluidHeights(int index) { return fluidHeights.length == 0 ? 0 : fluidHeights[index]; }
         public Model model(int id) { return palette.model(id); }
         public int colour(int index) { return palette.colour(index); }
         public int level() { return level; }

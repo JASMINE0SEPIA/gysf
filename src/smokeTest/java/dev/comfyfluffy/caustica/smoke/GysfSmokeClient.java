@@ -159,6 +159,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
             if(WATER_NEAR_REFERENCE && ready!=129) throw new IllegalStateException("Near-reference pool lane has unpublished sections: "+ready+"/129");
             System.out.println("GYSF_SMOKE: water near-ready="+near+" far-ready="+far);
             System.out.println("GYSF_SMOKE: water lane near-ready="+ready+"/129");
+            dev.comfyfluffy.caustica.rt.terrain.FluidHeightSmokeProbe.verify(Boolean.getBoolean("gysf.smoke.requirePreciseFluids"));
         }
         if (worldTicks==900) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                 image->{try {Files.createDirectories(Path.of("screenshots"));image.writeToFile(Path.of("screenshots","gysf-joint.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
@@ -219,6 +220,8 @@ public final class GysfSmokeClient implements ClientModInitializer {
             long leafCutouts=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.leafCutoutQuadCount();
             var lod=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE;
             if(WATER_FIXTURE && lod.waterQuadCount()==0) throw new IllegalStateException("Textured LOD water was not converted");
+            if(Boolean.getBoolean("gysf.smoke.requirePreciseFluids") && lod.preciseFluidQuadCount()==0)
+                throw new IllegalStateException("API 6 precise fluid geometry was not converted");
             if(MEMORY_PRESSURE && (maxMemoryDeferrals==0 || lod.memoryReductionCount()==0 || !observedBudgetRecovery
                     || pressureFallbackFrames<20 || !observedReducedProvider))
                 throw new IllegalStateException("LOD memory degradation/recovery was not observed before resource reload");
@@ -236,7 +239,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
             if(TEXTURE_FIXTURE && !Boolean.getBoolean("gysf.voxy.colourProxy") && leafCutouts==0)
                 throw new IllegalStateException("Foliage alpha-cutout metadata missing");
             System.out.println("GYSF_SMOKE: PASS frames="+RtComposite.frameCounter()+" maxVoxyMeshes="+maxMeshes+" maxRtLodSections="+maxRtSections+" texturedBatches="+textured+" atlasSlot="+VoxyCompat.boundAtlasSlot()+" leafCutoutQuads="+leafCutouts
-                    +" atomicSwaps="+lod.atomicVoxySwapCount()+" replacementSwaps="+lod.voxyReplacementSwapCount()+" coverageChecks="+lod.voxyCoverageCheckCount()+" waterQuads="+lod.waterQuadCount());
+                    +" atomicSwaps="+lod.atomicVoxySwapCount()+" replacementSwaps="+lod.voxyReplacementSwapCount()+" coverageChecks="+lod.voxyCoverageCheckCount()+" waterQuads="+lod.waterQuadCount()+" preciseFluidQuads="+lod.preciseFluidQuadCount());
             if(MOTION) System.out.println("GYSF_SMOKE: observed motion x="+motionMinX+".."+motionMaxX+" y="+motionMinY+".."+motionMaxY);
             if(memoryContext!=null) System.out.println("GYSF_SMOKE: memory live="+memoryContext.lodMemory().liveBytes()
                     +" peak="+memoryContext.lodMemory().peakBytes()+" deferrals="+maxMemoryDeferrals

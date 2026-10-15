@@ -124,4 +124,50 @@ final class RtVoxyMeshTest {
     @Test void invalidFaceIsRejectedBeforeArrayWrites() {
         assertThrows(IllegalArgumentException.class,()->RtVoxyMesh.corners(raw(6,0),FULL,false,1,new float[12],new float[8]));
     }
+
+    @Test void preciseStillWaterMatchesNearHeightAtEveryLodScale() {
+        long precise=58253L|(58253L<<16)|(58253L<<32)|(58253L<<48);
+        long quad=raw(1,0)|(0xB6L<<3)|(0xDL<<42); // legacy corners all 7/8
+        for(int scale:new int[]{1,2,4,8,16}) {
+            float[] p=new float[12],uv=new float[8];
+            RtVoxyMesh.corners(quad,FULL,true,scale,p,uv,precise);
+            for(int vertex=0;vertex<4;vertex++) assertEquals((8f/9f)*scale,p[vertex*3+1],scale*8e-6f);
+            RtVoxyMesh.corners(quad,FULL,true,scale,p,uv);
+            for(int vertex=0;vertex<4;vertex++) assertEquals(.875f*scale,p[vertex*3+1]);
+        }
+    }
+
+    @Test void preciseSideFacesKeepTheirBottomAndUseTheMatchingTopCorners() {
+        long precise=7282L|(21845L<<16)|(50972L<<32)|(58253L<<48);
+        float[] p=new float[12],uv=new float[8];
+        RtVoxyMesh.corners(raw(2,0),FULL,true,1,p,uv,precise);
+        assertArrayEquals(new float[]{0,1f/9f,7f/9f,0},new float[]{p[1],p[4],p[7],p[10]},1e-5f);
+        RtVoxyMesh.corners(raw(0,0),FULL,true,1,p,uv,precise);
+        for(int vertex=0;vertex<4;vertex++) assertEquals(0,p[vertex*3+1]);
+    }
+
+    @Test void preciseSnapshotsAreImmutableAndRejectMisalignedArrays() {
+        long[] heights={-1L};
+        var models=new VoxySceneData.Model[2]; models[1]=model(1,FULL,true,true);
+        var palette=new VoxySceneData.Palette(models,new int[0]);
+        var mesh=new VoxySceneData.Mesh(new long[]{raw(1,1)},palette,0,heights);
+        heights[0]=0; assertEquals(-1L,mesh.fluidHeights(0));
+        assertThrows(IllegalArgumentException.class,()->new VoxySceneData.Mesh(new long[2],palette,0,new long[1]));
+    }
+
+    @Test void preciseCornersJoinAllFourSidesToTheirSharedTopEdges() {
+        long precise=7282L|(21845L<<16)|(50972L<<32)|(58253L<<48);
+        float[] heights={1f/9f,1f/3f,7f/9f,8f/9f};
+        for(int face=1;face<6;face++) {
+            float[] p=new float[12],uv=new float[8];
+            RtVoxyMesh.corners(raw(face,0),FULL,true,1,p,uv,precise);
+            for(int vertex=0;vertex<4;vertex++) {
+                int offset=vertex*3;
+                if(face==1 || p[offset+1]>0) {
+                    int corner=((int)p[offset]<<1)|(int)p[offset+2];
+                    assertEquals(heights[corner],p[offset+1],1e-5f,"face="+face+", vertex="+vertex);
+                }
+            }
+        }
+    }
 }

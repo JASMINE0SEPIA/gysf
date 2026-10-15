@@ -76,6 +76,13 @@ ownership is independent of ray direction, including sloped fluid triangles.
 Legacy colour proxies retain a glossy entry approximation. Provider fluid-height
 quantization and coarse geometry still limit geometric near/far continuity.
 
+gysf 0.5.0 optionally consumes API 6 UNORM16 fluid corner heights while retaining
+API 5 geometry fallback. The paired Vulkan.7 provider exports these values only
+for external rendering and includes them in CPU cache payload accounting.
+This addresses the 8/9-to-7/8 still-water loss without changing raster quad bits.
+Coarse voxel aggregation, fluid/ceiling occlusion parity and detail selection
+still need broader geometric acceptance.
+
 The external provider starts with a 1024-block selection cap; the smoke run uses
 512 blocks. `-Dvoxy.external.maxDistanceBlocks=<512..10000>` selects a development
 limit without changing the user's stored Voxy distance. Per-sprite PBR, LOD emitter sampling,
