@@ -24,7 +24,9 @@ try {
         if ($env:DLSS_SDK) { $taskRun+='-PngxVendorConfig=rel' }
         if ($Joint) { $taskRun+='-PvooxxySmoke' }
         if ($ValidateVulkan) { $taskRun+='-PvalidateVulkan' }
-        & .\gradlew.bat @taskRun
+        $smokeLog=Join-Path $taskRoot 'build/validation-smoke.log'
+        & .\gradlew.bat @taskRun 2>&1 | Tee-Object -FilePath $smokeLog
         if ($LASTEXITCODE -ne 0) { throw 'gysf Vulkan smoke run failed.' }
+        & (Join-Path $PSScriptRoot 'Assert-VulkanSmokeLog.ps1') -Path $smokeLog
     }
 } finally { Pop-Location }

@@ -20,6 +20,7 @@
 #include "nvsdk_ngx_helpers_dlssg.h"
 #include "nvsdk_ngx_helpers_dlssg_vk.h"
 #include "rr_presets.h"
+#include "vulkan_clear_sync.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -141,6 +142,11 @@ NGX_SHIM_EXPORT int ngxshim_init(unsigned long long appId, const wchar_t* dataPa
             appId, (void*) dataPath, (void*) instance, (void*) physicalDevice, (void*) device,
             getInstanceProcAddr, getDeviceProcAddr, (void*) featureDllPath);
     g_device = device;
+    if(!ngxshim_vulkan::bind(device,reinterpret_cast<PFN_vkGetInstanceProcAddr>(getInstanceProcAddr),
+            reinterpret_cast<PFN_vkGetDeviceProcAddr>(getDeviceProcAddr))) {
+        g_lastResult=(int)NVSDK_NGX_Result_FAIL_InvalidParameter;
+        return g_lastResult;
+    }
 
     NVSDK_NGX_FeatureCommonInfo info;
     std::memset(&info, 0, sizeof(info));
@@ -160,8 +166,8 @@ NGX_SHIM_EXPORT int ngxshim_init(unsigned long long appId, const wchar_t* dataPa
     NVSDK_NGX_Result r = NVSDK_NGX_VULKAN_Init_with_ProjectID(
             kProjectId, NVSDK_NGX_ENGINE_TYPE_CUSTOM, "1.0", dataPath,
             instance, physicalDevice, device,
-            (PFN_vkGetInstanceProcAddr) getInstanceProcAddr,
-            (PFN_vkGetDeviceProcAddr) getDeviceProcAddr,
+            getInstanceProcAddr ? ngxshim_vulkan::instanceProc : nullptr,
+            ngxshim_vulkan::deviceProc,
             &info, NVSDK_NGX_Version_API);
     g_lastResult = (int) r;
     NGX_LOG("init: Init_with_ProjectID r=0x%08x", (unsigned) r);

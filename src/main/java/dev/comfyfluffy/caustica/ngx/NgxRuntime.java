@@ -132,13 +132,14 @@ public final class NgxRuntime {
 
         VkInstance instance = device.vkDevice().getPhysicalDevice().getInstance();
         try (Arena arena = Arena.ofConfined()) {
-            long gdpa;
+            long gipa,gdpa;
             try (MemoryStack stack = MemoryStack.stackPush()) {
+                gipa = VK10.vkGetInstanceProcAddr(instance, stack.ASCII("vkGetInstanceProcAddr"));
                 gdpa = VK10.vkGetInstanceProcAddr(instance, stack.ASCII("vkGetDeviceProcAddr"));
             }
             int rc = lib.init(0L, wideString(arena, dataPath.toString()),
                     instance.address(), device.vkDevice().getPhysicalDevice().address(), device.vkDevice().address(),
-                    0L, gdpa, wideString(arena, nativesDir == null ? "" : nativesDir.toString()));
+                    gipa, gdpa, wideString(arena, nativesDir == null ? "" : nativesDir.toString()));
             if (ngxFailed(rc)) {
                 throw new IllegalStateException("ngxshim_init failed: 0x" + Integer.toHexString(rc)
                         + " last=0x" + Integer.toHexString(lib.lastResult()));
