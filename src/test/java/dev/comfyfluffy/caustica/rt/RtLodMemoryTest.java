@@ -7,6 +7,27 @@ import static dev.comfyfluffy.caustica.rt.RtLodMemory.MIB;
 import static org.junit.jupiter.api.Assertions.*;
 
 final class RtLodMemoryTest {
+    @Test void reusableAllocatorBlocksAreNotCountedAsFreshDriverGrowth() {
+        var heap=new RtLodMemory.Heap(6450*MIB,6920*MIB,515*MIB,0,true,4800*MIB);
+        assertEquals(470*MIB,heap.availableBytes());
+        assertEquals(2870*MIB,heap.allocatorHeadroomBytes());
+        var memory=new RtLodMemory();
+        try(var ticket=memory.reserve(512*MIB,1024*MIB,heap,true)) {assertEquals(512*MIB,memory.liveBytes());}
+        assertEquals(0,memory.deferralCount());
+        var noPool=new RtLodMemory.Heap(6450*MIB,6920*MIB,515*MIB,0,true);
+        assertThrows(RtLodMemory.Pressure.class,()->memory.reserve(1,1024*MIB,noPool,true));
+    }
+
+    @Test void reuseCreditStillLeavesFragmentationSlackAndChargesCachedSampleGrowth() {
+        var heap=new RtLodMemory.Heap(750*MIB,1024*MIB,100*MIB,0,true,512*MIB);
+        var memory=new RtLodMemory();
+        try(var first=memory.reserve(200*MIB,1024*MIB,heap,true)) {
+            assertThrows(RtLodMemory.Pressure.class,()->memory.reserve(80*MIB,1024*MIB,heap,true));
+        }
+        var negativePool=new RtLodMemory.Heap(750*MIB,1024*MIB,100*MIB,0,true,-MIB);
+        assertEquals(negativePool.availableBytes(),negativePool.allocatorHeadroomBytes());
+    }
+
     private static RtLodMemory.Heap unknown() { return new RtLodMemory.Heap(0,0,0,0,false); }
 
     @Test void nativePaddingAndRetirementRemainChargedUntilDestruction() {

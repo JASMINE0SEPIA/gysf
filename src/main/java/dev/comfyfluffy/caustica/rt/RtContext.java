@@ -237,7 +237,9 @@ public final class RtContext {
                 } else driver=false;
             }
             if(budget<=0) budget=localHeapBytes;
-            memorySample=new RtLodMemory.Heap(usage,budget,own.statistics().allocationBytes(),lodMemory.liveBytes(),driver);
+            long allocationBytes=own.statistics().allocationBytes();
+            long pooledFreeBytes=Math.max(0,own.statistics().blockBytes()-allocationBytes);
+            memorySample=new RtLodMemory.Heap(usage,budget,allocationBytes,lodMemory.liveBytes(),driver,pooledFreeBytes);
             memorySampleAt=now;
             return memorySample;
         }
@@ -354,7 +356,7 @@ public final class RtContext {
                     : Vma.VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE);
             if (hostVisible) {
                 aci.flags(hostAccessFlags | Vma.VMA_ALLOCATION_CREATE_MAPPED_BIT);
-            } else if(lodTicket!=null) {
+            } else {
                 aci.flags(aci.flags()|Vma.VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT);
             }
             if (addressAlignment != 0L) {

@@ -239,6 +239,13 @@ public final class RtTerrain {
         return table.instances;
     }
 
+    /** Render-thread view, including invalidated tasks still retiring native allocations. */
+    public boolean hasPendingBuilds() {
+        synchronized(activeTaskLock) {
+            return activeTasks!=0 || !inFlight.isEmpty() || !completedBuilds.isEmpty() || !prepared.isEmpty();
+        }
+    }
+
     /** Section table device address: {@code {u64 primAddr, u64 uvAddr, u32 triBase[4]}} per section, indexed by gl_InstanceCustomIndexEXT. */
     public long tableAddress() {
         return table.address();
@@ -430,7 +437,11 @@ public final class RtTerrain {
         int pbz = mc.player.getBlockZ();
         int pcx = pbx >> 4, pcz = pbz >> 4, psy = pby >> 4;
         int requestedRadius=horizontalChunks(mc);
-        int r=nearMemory.update(requestedRadius,VoxyCompat.active(),System.nanoTime(),ctx.memoryBudget());
+        // A partially rebuilt far scene has not incurred its full working set yet. Let both
+        // builders settle before recovering near distance, otherwise each steals the other's
+        // temporary headroom and triggers another eviction/rebuild cycle.
+        boolean buildsSettled=!hasPendingBuilds() && !RtDistantHorizonsTerrain.INSTANCE.hasPendingBuilds();
+        int r=nearMemory.update(requestedRadius,VoxyCompat.active(),System.nanoTime(),ctx.memoryBudget(),buildsSettled);
         if(windowValid && r!=windowRadius) {
             CausticaMod.LOGGER.info("RT near memory window: {} -> {} chunks (requested {}); LOD ownership follows published readiness",
                     windowRadius,r,requestedRadius);

@@ -277,6 +277,14 @@ public final class RtDistantHorizonsTerrain {
         return current == null ? 0 : current.entries.size();
     }
 
+    /** Render-thread view; pending replacements have not incurred their full resident memory yet. */
+    public boolean hasPendingBuilds() {
+        synchronized(activeLock) {
+            return activeTasks!=0 || cpuPending || packPending || pending || buildSession!=null
+                    || !cpuCompleted.isEmpty() || !packCompleted.isEmpty() || !completed.isEmpty();
+        }
+    }
+
     public long texturedBuildCount() { return RtVoxyMesh.PACKED_BATCHES.get(); }
     public long leafCutoutQuadCount() { return RtVoxyMesh.LEAF_CUTOUT_QUADS.get(); }
     public long waterQuadCount() { return RtVoxyMesh.WATER_QUADS.get(); }
@@ -293,7 +301,7 @@ public final class RtDistantHorizonsTerrain {
         long now=System.nanoTime();
         var heap=ctx.memoryBudget();
         long limit=ctx.lodMemoryLimitBytes(heap),live=ctx.lodMemory().liveBytes();
-        boolean comfortable=live<limit*3/4 && (!heap.driverReported() || heap.availableBytes()>heap.reserveBytes()*2);
+        boolean comfortable=live<limit*3/4 && (!heap.driverReported() || heap.allocatorHeadroomBytes()>heap.reserveBytes()*2);
         if(memoryController.recover(VoxyCompat.requestedDistanceBlocks(),now,comfortable)) {
             VoxyCompat.limitDistance(memoryController.limitBlocks());
             capturedLodRevision=-1; nextRefresh=0;
@@ -301,9 +309,10 @@ public final class RtDistantHorizonsTerrain {
         }
         if(now>=nextMemoryLog) {
             nextMemoryLog=now+5_000_000_000L;
-            CausticaMod.LOGGER.info("RT LOD memory: native={} MiB, peak={} MiB, limit={} MiB, providerOwned={} MiB, RT heap allocations={} MiB, processUsage={} MiB, heapBudget={} MiB, driverReported={}, temporaryDistance={}",
+            CausticaMod.LOGGER.info("RT LOD memory: native={} MiB, peak={} MiB, limit={} MiB, providerOwned={} MiB, RT heap allocations={} MiB, processUsage={} MiB, heapBudget={} MiB, driverReported={}, temporaryDistance={}, RT pooled unused={} MiB, allocatorHeadroom={} MiB",
                     live>>20,ctx.lodMemory().peakBytes()>>20,limit>>20,VoxyCompat.ownedGpuBytes()>>20,
-                    heap.rtAllocationBytes()>>20,heap.usageBytes()>>20,heap.budgetBytes()>>20,heap.driverReported(),memoryController.limitBlocks());
+                    heap.rtAllocationBytes()>>20,heap.usageBytes()>>20,heap.budgetBytes()>>20,heap.driverReported(),memoryController.limitBlocks(),
+                    heap.pooledFreeBytes()>>20,heap.allocatorHeadroomBytes()>>20);
         }
     }
 

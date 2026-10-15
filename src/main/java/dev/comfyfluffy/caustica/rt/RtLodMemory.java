@@ -4,9 +4,19 @@ package dev.comfyfluffy.caustica.rt;
 public final class RtLodMemory {
     public static final long MIB = 1L << 20;
     public record Heap(long usageBytes, long budgetBytes, long rtAllocationBytes,
-                       long observedLodBytes, boolean driverReported) {
+                       long observedLodBytes, boolean driverReported, long pooledFreeBytes) {
+        public Heap(long usageBytes,long budgetBytes,long rtAllocationBytes,long observedLodBytes,boolean driverReported) {
+            this(usageBytes,budgetBytes,rtAllocationBytes,observedLodBytes,driverReported,0);
+        }
         public long availableBytes() { return Math.max(0, budgetBytes - usageBytes); }
         public long reserveBytes() { return Math.min(1024*MIB, Math.max(256*MIB, budgetBytes/10)); }
+        /** This allocator can reuse its reserved blocks without increasing process heap usage.
+         * Credit only half the unused storage to leave slack for fragmentation and memory-type fits.
+         * This is not additional headroom for another allocator or the Voxy provider. */
+        public long allocatorHeadroomBytes() {
+            long credit=Math.max(0,pooledFreeBytes)/2;
+            return availableBytes()+Math.min(credit,Long.MAX_VALUE-availableBytes());
+        }
     }
     public static final class Pressure extends RuntimeException {
         private final long requestedBytes;
@@ -56,7 +66,7 @@ public final class RtLodMemory {
         // Cached driver readings already include allocations made by all allocators in this process.
         // Charge only LOD growth since that reading; never sum separate VMA heap usage estimates.
         long growth = Math.max(0, live-heap.observedLodBytes);
-        long available = Math.max(0, heap.availableBytes()-growth);
+        long available = Math.max(0, heap.allocatorHeadroomBytes()-growth);
         if (devicePreferred && heap.driverReported && bytes > Math.max(0, available-heap.reserveBytes())) {
             return "Driver heap headroom reserved for near rendering";
         }

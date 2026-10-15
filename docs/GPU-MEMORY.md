@@ -37,8 +37,17 @@ selection can retire old geometry. They are still counted and retired normally.
 Before device-preferred LOD allocations, the consumer additionally preserves
 10% of the reported heap budget (256..1024 MiB) for near rendering and other
 resources. Growth since the cached driver snapshot is charged against that
-headroom. Device LOD allocations also use VMA's `WITHIN_BUDGET` flag; a native
+headroom. Device-preferred buffer allocations also use VMA's `WITHIN_BUDGET` flag; a native LOD
 device-memory rejection becomes a deferral rather than disabling the renderer.
+
+The 0.7 development path distinguishes live allocations from unused storage in
+the current RT allocator's reserved device blocks. It credits half of that unused
+storage toward this allocator's admission/recovery headroom, leaving the rest for
+fragmentation and memory-type compatibility. Reusing it need not grow process
+heap usage. This is not additional physical memory or credit for Voxy's separate
+allocator. Physical block growth still goes through VMA's budget checks. Raw
+process usage, live RT allocation bytes and unused reserved storage are all
+logged separately.
 
 ## Distance control
 
@@ -54,6 +63,21 @@ limit. The consumer uses the optional API 5 bridge method
 `setExternalDistanceLimit`; it never writes the user's Voxy distance setting.
 Older providers without this method can defer allocation, but cannot provide
 automatic distance reduction. Use the paired Vulkan 6 provider for recovery.
+
+In the 0.7 development path, driver pressure can also reduce the transient near
+window while Voxy is active. The requested/saved distance remains unchanged.
+The radius contracts by a quarter at most every two seconds, with a four-chunk
+floor (or the smaller user request). New missing sections pause under pressure;
+edits may still replace existing geometry. The actual published-readiness mask,
+including confirmed-empty sections, continues to determine LOD ownership.
+Ten seconds of comfortable allocator headroom permits gradual recovery, only
+after both near and LOD build queues have settled. A partially built replacement
+must not trigger growth that evicts it again when its remaining allocations arrive.
+
+Rejected LOD allocations also gate later refresh admission before another CPU
+plan or BLAS build. The retained request is checked without creating a ticket or
+counting another deferral. The captured pressure and retained-pool investigations
+are recorded in [PERFORMANCE-2026-10-15.md](PERFORMANCE-2026-10-15.md).
 
 This is admission control for textured RT LOD resources, with a shared-process
 headroom signal. It is not a hard cap on every allocation in Minecraft, every
