@@ -1006,7 +1006,8 @@ public final class RtComposite {
                             RtDeviceBringup.worldRaygenShader()},
                     new String[]{"world.rmiss.spv", "world_guide.rmiss.spv"},
                     "world.rchit.spv", "world.rahit.spv",
-                    WorldPushConstantsData.BYTE_SIZE, true, GUIDE_COUNT, bindlessTextureCapacity, true);
+                    WorldPushConstantsData.BYTE_SIZE, true, GUIDE_COUNT, bindlessTextureCapacity, true,
+                    dev.comfyfluffy.caustica.rt.terrain.RtWaterGeometry.runtimeEnabled() ? "world_water.rint.spv" : null);
             // Per-frame world data lives in this BDA ring; the pipeline pushes its address and hot fields.
             if (pushRing == null) {
                 pushRing = new PushSlot[PUSH_RING];

@@ -136,8 +136,16 @@ public final class RtPipeline {
      * dispatch by index.
      */
     public static RtPipeline create(RtContext ctx, String[] rgen, String[] rmiss, String rchit, String rahit, int pushConstantSize, boolean withBlockAlbedoAtlas, int extraStorageImages, int bindlessTextures, boolean skyAtlas) {
+        return create(ctx,rgen,rmiss,rchit,rahit,pushConstantSize,withBlockAlbedoAtlas,extraStorageImages,bindlessTextures,skyAtlas,null);
+    }
+
+    public static RtPipeline create(RtContext ctx, String[] rgen, String[] rmiss, String rchit, String rahit,
+                                    int pushConstantSize, boolean withBlockAlbedoAtlas, int extraStorageImages,
+                                    int bindlessTextures, boolean skyAtlas,String waterIntersection) {
         VkDevice vk = ctx.vk();
         boolean hasAhit = rahit != null;
+        boolean hasWater=waterIntersection!=null;
+        if(hasWater && !hasAhit)throw new IllegalArgumentException("Finite water needs the complete terrain/shadow SBT");
         String label = "world RT pipeline";
         if (bindlessTextures > 0) {
             long requiredCombinedSamplers = Math.addExact(
@@ -255,7 +263,8 @@ public final class RtPipeline {
             // Miss reads pc for the dynamic sky; widening the stage mask is the whole cost — no gotcha #3.
             int pcStages = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
                     | VK_SHADER_STAGE_MISS_BIT_KHR
-                    | (hasAhit ? VK_SHADER_STAGE_ANY_HIT_BIT_KHR : 0);
+                    | (hasAhit ? VK_SHADER_STAGE_ANY_HIT_BIT_KHR : 0)
+                    | (hasWater ? org.lwjgl.vulkan.KHRRayTracingPipeline.VK_SHADER_STAGE_INTERSECTION_BIT_KHR : 0);
             if (pushConstantSize > 0) {
                 VkPushConstantRange.Buffer pcr = VkPushConstantRange.calloc(1, stack)
                         .stageFlags(pcStages)
@@ -278,7 +287,8 @@ public final class RtPipeline {
             int hitGroupIdx = raygenCount + missCount;
             int chitStage = raygenCount + missCount;
             int ahitStage = chitStage + 1;
-            int stageCount = raygenCount + missCount + 1 + (hasAhit ? 1 : 0);
+            int intersectionStage=chitStage+1+(hasAhit ? 1 : 0);
+            int stageCount = raygenCount + missCount + 1 + (hasAhit ? 1 : 0)+(hasWater ? 1 : 0);
             long[] mGen = new long[raygenCount];
             for (int g = 0; g < raygenCount; g++) {
                 mGen[g] = loadModule(vk, stack, rgen[g]);
@@ -295,6 +305,7 @@ public final class RtPipeline {
             if (hasAhit) {
                 RtDebugLabels.name(ctx, VK10.VK_OBJECT_TYPE_SHADER_MODULE, mAhit, label + " " + rahit);
             }
+            long mIntersection=hasWater ? loadModule(vk,stack,waterIntersection) : 0;
             ByteBuffer entry = stack.UTF8("main");
             VkPipelineShaderStageCreateInfo.Buffer stages = VkPipelineShaderStageCreateInfo.calloc(stageCount, stack);
             for (int g = 0; g < raygenCount; g++) {
@@ -307,6 +318,9 @@ public final class RtPipeline {
             if (hasAhit) {
                 stages.get(ahitStage).sType$Default().stage(VK_SHADER_STAGE_ANY_HIT_BIT_KHR).module(mAhit).pName(entry);
             }
+            if(hasWater)stages.get(intersectionStage).sType$Default()
+                    .stage(org.lwjgl.vulkan.KHRRayTracingPipeline.VK_SHADER_STAGE_INTERSECTION_BIT_KHR)
+                    .module(mIntersection).pName(entry);
 
             VkRayTracingShaderGroupCreateInfoKHR.Buffer groups = VkRayTracingShaderGroupCreateInfoKHR.calloc(groupCount, stack);
             for (int g = 0; g < raygenCount; g++) {
@@ -318,10 +332,13 @@ public final class RtPipeline {
                         .generalShader(raygenCount + m).closestHitShader(VK_SHADER_UNUSED_KHR).anyHitShader(VK_SHADER_UNUSED_KHR).intersectionShader(VK_SHADER_UNUSED_KHR);
             }
             for (int h = 0; h < hitGroupCount; h++) {
-                groups.get(hitGroupIdx + h).sType$Default().type(VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR)
+                boolean waterGroup=hasWater && (h==RtAccel.BUCKET_WATER || h==RtAccel.TERRAIN_BUCKETS+RtAccel.BUCKET_WATER);
+                groups.get(hitGroupIdx + h).sType$Default().type(waterGroup
+                                ? org.lwjgl.vulkan.KHRRayTracingPipeline.VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR
+                                : VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR)
                         .generalShader(VK_SHADER_UNUSED_KHR).closestHitShader(chitStage)
                         .anyHitShader(hasAhit && hitGroupUsesAnyHit(h) ? ahitStage : VK_SHADER_UNUSED_KHR)
-                        .intersectionShader(VK_SHADER_UNUSED_KHR);
+                        .intersectionShader(waterGroup ? intersectionStage : VK_SHADER_UNUSED_KHR);
             }
 
             VkRayTracingPipelineCreateInfoKHR.Buffer rtpci = VkRayTracingPipelineCreateInfoKHR.calloc(1, stack);
@@ -344,6 +361,7 @@ public final class RtPipeline {
                 VK10.vkDestroyShaderModule(vk, mMiss[m], null);
             }
             VK10.vkDestroyShaderModule(vk, mHit, null);
+            if(hasWater)VK10.vkDestroyShaderModule(vk,mIntersection,null);
             if (hasAhit) {
                 VK10.vkDestroyShaderModule(vk, mAhit, null);
             }

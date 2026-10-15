@@ -253,7 +253,8 @@ public final class RtDistantHorizonsTerrain {
                         0, 1, 0, geom.sy - rebaseY,
                         0, 0, 1, geom.sz - rebaseZ};
                 frameDhInstances[i] = new RtAccel.Instance(transform,
-                        geom.blas.deviceAddress, DH_INSTANCE_KIND | i, RAY_MASK);
+                        geom.blas.deviceAddress, DH_INSTANCE_KIND | i, RAY_MASK,0,
+                        geom.waterBlas!=null ? geom.waterBlas.deviceAddress : 0);
             }
         } else {
             for (int i = 0; i < frameDhInstances.length; i++) {
@@ -275,6 +276,13 @@ public final class RtDistantHorizonsTerrain {
 
     public int residentSectionCount() {
         return current == null ? 0 : current.entries.size();
+    }
+
+    public int waterInstanceCount() {
+        if(current==null)return 0;
+        int count=0;
+        for(var entry:current.entries)if(entry.geom.waterBlas!=null)count++;
+        return count;
     }
 
     /** Render-thread view; pending replacements have not incurred their full resident memory yet. */
@@ -942,10 +950,10 @@ public final class RtDistantHorizonsTerrain {
                     () -> taskEpoch != epoch,
                     cmd -> {
                         RtSectionBuilder.recordUpload(cmd, owned);
-                        RtAccel.recordBlasBuilds(ctx, cmd, List.of(owned.blas()));
+                        RtAccel.recordBlasBuilds(ctx, cmd, owned.blases());
                     },
                     () -> {
-                        RtAccel.freeBlasScratch(List.of(owned.blas()));
+                        RtAccel.freeBlasScratch(owned.blases());
                         owned.releaseUpload();
                     },
                     (build, failure) -> {
@@ -1054,7 +1062,8 @@ public final class RtDistantHorizonsTerrain {
             }
             PlannedBatch item = done.item;
             RtSectionTable.SectionGeom geom = new RtSectionTable.SectionGeom(item.batchKey, prepared.uvs(),
-                    prepared.material(), prepared.blas().accel, prepared.triBase(),
+                    prepared.material(), prepared.blas().accel, prepared.water(),
+                    prepared.waterBlas()!=null ? prepared.waterBlas().accel : null, prepared.triBase(),
                     prepared.sx(), prepared.sy(), prepared.sz(), prepared.lights());
             GeomEntry entry = new GeomEntry(item.batchKey, item.sourceKey, item.sourceVersion,
                     item.originX, item.originZ, item.sourceWidth, item.dataPointWidth, item.volume, geom);
@@ -1159,18 +1168,14 @@ public final class RtDistantHorizonsTerrain {
                 return;
             }
             try(var budgetScope=session.transition!=null ? ctx.lodMetadata() : null) {
-                table = ctx.createBuffer(Math.max(32L, Math.multiplyExact(32L, count)), VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true,
+                table = ctx.createBuffer(Math.max((long)RtSectionTable.SECTION_ENTRY_BYTES,
+                                Math.multiplyExact((long)RtSectionTable.SECTION_ENTRY_BYTES, count)), VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true,
                         "Distant Horizons RT proxy table " + count + " batches");
             }
             long p = table.mapped;
             for (int section = 0; section < count; section++) {
                 RtSectionTable.SectionGeom geom = entries.get(section).geom;
-                long entry = p + section * 32L;
-                MemoryUtil.memPutLong(entry, geom.material.deviceAddress);
-                MemoryUtil.memPutLong(entry + 8, geom.uvs.deviceAddress);
-                for (int i = 0; i < 4; i++) {
-                    MemoryUtil.memPutInt(entry + 16L + i * 4L, geom.triBase[i]);
-                }
+                RtSectionTable.writeRecord(p+(long)section*RtSectionTable.SECTION_ENTRY_BYTES,geom);
             }
             table.flush();
             if (session.lastBuild != null) {
@@ -1302,9 +1307,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private static void destroyBuilt(PreparedSection prepared) {
-        prepared.blas().accel.destroy();
-        prepared.material().destroy();
-        prepared.uvs().destroy();
+        prepared.destroyResident();
     }
 
     private record Completed(long epoch, long revision, PlannedBatch item, PreparedSection prepared,

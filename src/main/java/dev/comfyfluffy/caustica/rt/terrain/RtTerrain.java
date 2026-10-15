@@ -84,7 +84,7 @@ import dev.comfyfluffy.caustica.rt.terrain.RtSectionTable.SectionGeom;
  * instance carries a
  * translation {@code sectionOrigin − rebaseOrigin} (rebase = player block at the last rebuild, so
  * transforms stay small at any world coordinate) and an {@code instanceCustomIndex} into a BDA
- * section table ({@code {primAddr, uvAddr, triBase[4]}} per section) the hit shaders read. The index
+ * section table ({@code {primAddr, uvAddr, triBase[4], waterAddr}} per section) the hit shaders read. The index
  * buffer itself is retained only for the BLAS build (per-triangle corner UVs mean shading never needs
  * an index-buffer read — lever B), so its address isn't duplicated into this table.
  *
@@ -112,7 +112,6 @@ public final class RtTerrain {
         return CausticaConfig.Rt.Terrain.MAX_INFLIGHT_SECTIONS.value();
     }
 
-    private static final int SECTION_ENTRY_BYTES = 32; // {u64 primAddr, u64 uvAddr, u32 triBase[4]}
     private static final long NO_TESS_TOKEN = Long.MIN_VALUE;
     private static final int NO_MISSING_INDEX = -1;
     private static final long NO_DIRTY_GROUP = 0L;
@@ -246,7 +245,7 @@ public final class RtTerrain {
         }
     }
 
-    /** Section table device address: {@code {u64 primAddr, u64 uvAddr, u32 triBase[4]}} per section, indexed by gl_InstanceCustomIndexEXT. */
+    /** Reflected section-table records, indexed by gl_InstanceCustomIndexEXT; finite water has an optional child pointer. */
     public long tableAddress() {
         return table.address();
     }
@@ -1261,10 +1260,10 @@ public final class RtTerrain {
                 () -> !isTaskCurrent(task),
                 cmd -> {
                     RtSectionBuilder.recordUpload(cmd, prepared);
-                    RtAccel.recordBlasBuilds(ctx, cmd, List.of(prepared.blas()));
+                    RtAccel.recordBlasBuilds(ctx, cmd, prepared.blases());
                 },
                 () -> {
-                    RtAccel.freeBlasScratch(List.of(prepared.blas()));
+                    RtAccel.freeBlasScratch(prepared.blases());
                     prepared.releaseUpload();
                 },
                 (build, failure) -> {
@@ -1626,7 +1625,8 @@ public final class RtTerrain {
 
         for (PreparedSection ps : prepared) {
             SectionGeom g = new SectionGeom(ps.key(), ps.uvs(), ps.material(),
-                    ps.blas().accel, ps.triBase(), ps.sx(), ps.sy(), ps.sz(), ps.lights());
+                    ps.blas().accel, ps.water(), ps.waterBlas()!=null ? ps.waterBlas().accel : null,
+                    ps.triBase(), ps.sx(), ps.sy(), ps.sz(), ps.lights());
             if (!desired.contains(ps.key())) {
                 // Left the window while its batched BLAS build was in flight (window sync keeps running
                 // during builds). Never published — retire the fresh, unreferenced geometry.

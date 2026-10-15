@@ -41,9 +41,14 @@ final class RtSectionBuilder {
         RtBuffer indices = null;
         RtBuffer uvs = null;
         RtBuffer material = null;
+        RtBuffer water = null, waterBounds = null;
         RtBuffer upload = null;
         RtAccel.PreparedBlas blas = null;
+        RtAccel.PreparedBlas waterBlas = null;
         try {
+            RtWaterGeometry.Packed waterPacked=RtWaterGeometry.runtimeEnabled() && packed.bucketTris()[RtAccel.BUCKET_WATER]>0
+                    ? RtWaterGeometry.pack(packed.positions(),packed.indices(),packed.triBase()[RtAccel.BUCKET_WATER],
+                            packed.bucketTris()[RtAccel.BUCKET_WATER],null) : null;
             long positionsBytes = (long) packed.positions().length * Float.BYTES;
             long indicesBytes = (long) packed.indices().length * Integer.BYTES;
             long uvsBytes = (long) packed.uvs().length * Float.BYTES;
@@ -56,7 +61,12 @@ final class RtSectionBuilder {
                     label + " indices");
             uvs = ctx.createAsyncBuffer(uvsBytes, storage | transferDst, false, label + " uvs");
             material = ctx.createAsyncBuffer(materialBytes, storage | transferDst, false, label + " material");
-            upload = ctx.createUploadBuffer(positionsBytes + indicesBytes + uvsBytes + materialBytes,
+            if(waterPacked!=null) {
+                water=ctx.createAsyncBuffer((long)waterPacked.primitives().length*Float.BYTES,storage|transferDst,false,label+" water primitives");
+                waterBounds=ctx.createAsyncBuffer((long)waterPacked.aabbs().length*Float.BYTES,asInput|transferDst,false,label+" water bounds");
+            }
+            upload = ctx.createUploadBuffer(positionsBytes + indicesBytes + uvsBytes + materialBytes
+                            +(waterPacked!=null ? waterPacked.bytes() : 0),
                     label + " upload");
 
             long cursor = upload.mapped;
@@ -67,23 +77,29 @@ final class RtSectionBuilder {
             MemoryUtil.memFloatBuffer(cursor, packed.uvs().length).put(packed.uvs());
             cursor += uvsBytes;
             MemoryUtil.memFloatBuffer(cursor, packed.material().length).put(packed.material());
+            cursor+=materialBytes;
+            if(waterPacked!=null) {
+                MemoryUtil.memFloatBuffer(cursor,waterPacked.primitives().length).put(waterPacked.primitives());
+                cursor+=water.size;
+                MemoryUtil.memFloatBuffer(cursor,waterPacked.aabbs().length).put(waterPacked.aabbs());
+            }
             upload.flush();
 
             blas = RtAccel.prepareTerrainBlas(ctx, positions, vertCount, indices,
-                    packed.bucketTris(), ommInput, compactBlas, label + " BLAS");
-            return new PreparedSection(key, positions, indices, uvs, material, upload, blas,
+                    waterPacked!=null ? java.util.Arrays.copyOf(packed.bucketTris(),RtAccel.BUCKET_WATER) : packed.bucketTris(),
+                    ommInput, compactBlas, label + " BLAS");
+            if(waterPacked!=null)waterBlas=RtAccel.prepareWaterBlas(ctx,waterBounds,waterPacked.triangleCount(),label+" water BLAS");
+            return new PreparedSection(key, positions, indices, uvs, material, water, waterBounds, upload, blas, waterBlas,
                     packed.triBase(), sox, soy, soz, packed.lights());
         } catch (Throwable t) {
-            if (blas != null) {
-                destroy(new PreparedSection(key, positions, indices, uvs, material, upload, blas,
-                        packed.triBase(), sox, soy, soz, packed.lights()));
-            } else {
-                if (upload != null) upload.destroy();
-                if (material != null) material.destroy();
-                if (uvs != null) uvs.destroy();
-                if (indices != null) indices.destroy();
-                if (positions != null) positions.destroy();
-            }
+            destroyBlas(waterBlas);destroyBlas(blas);
+            if (upload != null) upload.destroy();
+            if (waterBounds != null) waterBounds.destroy();
+            if (water != null) water.destroy();
+            if (material != null) material.destroy();
+            if (uvs != null) uvs.destroy();
+            if (indices != null) indices.destroy();
+            if (positions != null) positions.destroy();
             throw t;
         }
     }
@@ -100,12 +116,18 @@ final class RtSectionBuilder {
             copy(cmd, prepared.upload, prepared.uvs, srcOffset, region);
             srcOffset += prepared.uvs.size;
             copy(cmd, prepared.upload, prepared.material, srcOffset, region);
+            srcOffset+=prepared.material.size;
+            if(prepared.water!=null) {
+                copy(cmd,prepared.upload,prepared.water,srcOffset,region);srcOffset+=prepared.water.size;
+                copy(cmd,prepared.upload,prepared.waterBounds,srcOffset,region);
+            }
 
             VkMemoryBarrier2.Buffer barrier = VkMemoryBarrier2.calloc(1, stack);
             barrier.get(0).sType$Default()
                     .srcStageMask(VK_PIPELINE_STAGE_2_TRANSFER_BIT)
                     .srcAccessMask(VK_ACCESS_2_TRANSFER_WRITE_BIT)
-                    .dstStageMask(VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR)
+                    .dstStageMask(VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
+                            | org.lwjgl.vulkan.KHRSynchronization2.VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR)
                     // Vertex/index build inputs are shader reads at the AS-build stage. The
                     // ACCELERATION_STRUCTURE_READ access class is for reading AS objects themselves.
                     .dstAccessMask(VK_ACCESS_2_SHADER_READ_BIT);
@@ -121,19 +143,19 @@ final class RtSectionBuilder {
     }
 
     static void destroy(PreparedSection prepared) {
-        RtAccel.freeBlasScratch(java.util.List.of(prepared.blas));
-        prepared.blas.accel.destroy();
-        prepared.upload.destroy();
-        prepared.material.destroy();
-        prepared.uvs.destroy();
-        prepared.indices.destroy();
-        prepared.positions.destroy();
+        RtAccel.freeBlasScratch(prepared.blases());
+        prepared.destroyResident();prepared.releaseUpload();prepared.releaseBuildInputs();
+    }
+
+    private static void destroyBlas(RtAccel.PreparedBlas blas) {
+        if(blas!=null) { RtAccel.freeBlasScratch(java.util.List.of(blas));blas.accel.destroy(); }
     }
 
     /** Worker-owned native section state paired with its prepared BLAS. {@code lights} = packed
      *  section-local RIS light records (CPU-side, flattened into the global buffer at publish). */
     record PreparedSection(long key, RtBuffer positions, RtBuffer indices, RtBuffer uvs,
-                           RtBuffer material, RtBuffer upload, RtAccel.PreparedBlas blas, int[] triBase,
+                           RtBuffer material, RtBuffer water, RtBuffer waterBounds, RtBuffer upload,
+                           RtAccel.PreparedBlas blas, RtAccel.PreparedBlas waterBlas, int[] triBase,
                            int sx, int sy, int sz, float[] lights) {
         void releaseUpload() {
             upload.destroy();
@@ -142,10 +164,21 @@ final class RtSectionBuilder {
         void releaseBuildInputs() {
             indices.destroy();
             positions.destroy();
+            if(waterBounds!=null)waterBounds.destroy();
+        }
+
+        java.util.List<RtAccel.PreparedBlas> blases() {
+            return waterBlas!=null ? java.util.List.of(blas,waterBlas) : java.util.List.of(blas);
+        }
+
+        void destroyResident() {
+            blas.accel.destroy();material.destroy();uvs.destroy();
+            if(waterBlas!=null)waterBlas.accel.destroy();
+            if(water!=null)water.destroy();
         }
 
         PreparedSection withBlas(RtAccel.PreparedBlas replacement) {
-            return new PreparedSection(key, positions, indices, uvs, material, upload, replacement,
+            return new PreparedSection(key, positions, indices, uvs, material, water, waterBounds, upload, replacement, waterBlas,
                     triBase, sx, sy, sz, lights);
         }
     }

@@ -15,9 +15,12 @@ struct RestirReservoirLayoutProbe {
     PackedRestirReservoir values[2]; // reflected stride is the per-pixel persistent record size
 };
 
+struct SectionLayoutProbe { Section values[2]; };
+
 [[vk::binding(0, 0)]] StructuredBuffer<WorldPushLayoutProbe, Std430DataLayout> worldPushLayoutProbe;
 [[vk::binding(1, 0)]] StructuredBuffer<MaterialHeaderLayoutProbe, Std430DataLayout> materialHeaderLayoutProbe;
 [[vk::binding(2, 0)]] StructuredBuffer<RestirReservoirLayoutProbe, Std430DataLayout> restirReservoirLayoutProbe;
+[[vk::binding(3, 0)]] StructuredBuffer<SectionLayoutProbe, Std430DataLayout> sectionLayoutProbe;
 [[vk::push_constant]] WorldPushConstants pushConstantsLayoutProbe;
 
 [shader("compute")]
@@ -28,6 +31,7 @@ void main(uint3 id : SV_DispatchThreadID) {
         float sink = worldPushLayoutProbe[0].values[0].invViewProj[0][0]
                 + materialHeaderLayoutProbe[0].values[0].params.x
                 + restirReservoirLayoutProbe[0].values[0].W
+                + float(sectionLayoutProbe[0].values[0].waterAddr)
                 + float(pushConstantsLayoutProbe.frameIndex);
     }
 }

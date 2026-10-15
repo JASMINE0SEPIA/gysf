@@ -18,6 +18,7 @@
 
 import world_common;
 import world_core;
+import math;
 
 public static const float WATER_WAVE_STRENGTH = 0.9;  // slope + height scale (higher = taller, choppier waves)
 public static const float WAVE_SPEED = 0.8;           // global time scale; dispersion keeps relative speeds physical
@@ -205,6 +206,40 @@ public WaterWaves flatWaterWaves(float3 planePos, float hitT, float3 nGeo) {
     waves.previousNormal = nGeo;
     waves.geometricNormal = nGeo;
     waves.motionPrev = float3(0.0, 0.0, 0.0);
+    return waves;
+}
+
+public uint packWaterGuideNormal(float3 n) {
+    n/=abs(n.x)+abs(n.y)+abs(n.z);
+    float2 p=n.xz;
+    if(n.y<0) p=(1.0-abs(p.yx))*float2(p.x<0?-1.0:1.0,p.y<0?-1.0:1.0);
+    int2 quantized=int2(round(clamp(p,-1.0,1.0)*32767.0));
+    return (uint(quantized.x)&0xffffu)|(uint(quantized.y)<<16);
+}
+
+public float3 unpackWaterGuideNormal(uint packed) {
+    int2 signedValue=int2(int(packed<<16)>>16,int(packed)>>16);
+    float2 p=max(float2(signedValue)/32767.0,float2(-1));
+    float3 n=float3(p.x,1.0-abs(p.x)-abs(p.y),p.y);
+    if(n.y<0)n.xz=(1.0-abs(n.zx))*float2(n.x<0?-1.0:1.0,n.z<0?-1.0:1.0);
+    return normalize(n);
+}
+
+public uint packPreviousWaterGuideNormal(float3 normal) {
+    // Match the previous frame's half3 payload storage before the higher-precision oct encoding.
+    // Otherwise frozen waves acquire a false normal delta from using different current/history codecs.
+    float3 stored=float3(f16tof32(f32tof16(normal.x)),f16tof32(f32tof16(normal.y)),f16tof32(f32tof16(normal.z)));
+    return packWaterGuideNormal(stored);
+}
+
+public bool finiteWaterHit() { return (payload.flags&PAYLOAD_FINITE_WATER)!=0u; }
+
+// The acceleration structure already reported the displaced surface. Preserve that point and
+// its actual normal for optical bias; no rest-plane projection or second Newton solve is needed.
+public WaterWaves finiteWaterFromPayload(float3 position,float hitT,float3 normal) {
+    WaterWaves waves=flatWaterWaves(position,hitT,normal);
+    waves.previousNormal=unpackWaterGuideNormal(payload.previousWaterNormal);
+    waves.motionPrev=float3(payload.motionPrev);
     return waves;
 }
 

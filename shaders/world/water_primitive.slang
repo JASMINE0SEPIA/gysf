@@ -1,4 +1,5 @@
 import water_patch;
+import water;
 
 // RtWaterGeometry: five std430 float4 lanes, 80 bytes per water triangle. v0.w marks a free top;
 // v1.w is its projected half (including either quad diagonal). All other faces stay exact flat triangles.
@@ -19,6 +20,31 @@ public WaterPatch primitiveWaterPatch(WaterPrimitive primitive,float3 translatio
     patch.shore=primitive.shore;
     patch.half=uint(primitive.v1.w);
     return patch;
+}
+
+public WaterWaves primitiveWaterWaves(WaterPrimitive primitive,float3 translation,float3 position,
+        float hitT,bool animated,float currentT,float previousT) {
+    float3 restNormal=normalize(cross(primitive.v1.xyz-primitive.v0.xyz,primitive.v2.xyz-primitive.v0.xyz));
+    WaterWaves waves=flatWaterWaves(position,hitT,restNormal);
+    if(primitive.v0.w!=0 && animated) {
+        WaterPatch patch=primitiveWaterPatch(primitive,translation);
+        float height,previousHeight;float2 gradient,previousGradient;
+        patchField(patch,position.xz,currentT,0.0,height,gradient);
+        patchField(patch,position.xz,previousT,0.0,previousHeight,previousGradient);
+        waves.normal=waterSurfaceNormal(restNormal,gradient);
+        waves.previousNormal=waterSurfaceNormal(restNormal,previousGradient);
+        waves.motionPrev=float3(0,height-previousHeight,0);
+        waves.geometricNormal=waves.normal;
+    }
+    return waves;
+}
+
+public float3 primitiveWaterOwnership(WaterPrimitive primitive,float3 translation,float3 displacedPosition) {
+    float3 normal=cross(primitive.v1.xyz-primitive.v0.xyz,primitive.v2.xyz-primitive.v0.xyz);
+    if(primitive.v0.w==0)return displacedPosition;
+    float3 point=primitive.v0.xyz+translation;
+    float y=point.y-dot(normal.xz,displacedPosition.xz-point.xz)/normal.y;
+    return float3(displacedPosition.x,y,displacedPosition.z);
 }
 
 public float flatWaterTriangle(WaterPrimitive primitive,float3 translation,float3 ro,float3 rd,

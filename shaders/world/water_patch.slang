@@ -2,7 +2,7 @@ import water;
 import world_core;
 
 // Finite-water intersection module. A triangle's rest plane is affine; the original quad's four shore
-// weights are shared by both halves. Not yet selected by the game pipeline; native probes use this module.
+// weights are shared by both halves. The gated game intersection stage and native probes share this module.
 public struct WaterPatch {
     public float3 point;
     public float3 normal;

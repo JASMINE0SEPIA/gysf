@@ -284,17 +284,18 @@ public final class RtAccel {
         private final boolean entitySplit;
         private final int[] entityTris; // opaque/any-hit counts (null if !entitySplit)
         private final OpacityMicromap opacityMicromap; // optional, terrain cutout bucket only
+        private final boolean waterAabbs;
 
         private PreparedBlas(RtAccel accel, RtBuffer scratch, RtBuffer externalBacking, long vertexAddr, long indexAddr,
                              int maxVertex, int triangleCount, boolean opaque, String label, boolean updatable, boolean update) {
             this(accel, scratch, externalBacking, vertexAddr, indexAddr, maxVertex, triangleCount, opaque, label,
-                    updatable, update, false, null, false, null, null);
+                    updatable, update, false, null, false, null, null, false);
         }
 
         private PreparedBlas(RtAccel accel, RtBuffer scratch, RtBuffer externalBacking, long vertexAddr, long indexAddr,
                              int maxVertex, int triangleCount, boolean opaque, String label, boolean updatable, boolean update,
                              boolean terrainSplit, int[] terrainTris, boolean entitySplit, int[] entityTris,
-                             OpacityMicromap opacityMicromap) {
+                             OpacityMicromap opacityMicromap, boolean waterAabbs) {
             this.accel = accel;
             this.scratch = scratch;
             this.externalBacking = externalBacking;
@@ -311,6 +312,7 @@ public final class RtAccel {
             this.entitySplit = entitySplit;
             this.entityTris = entityTris;
             this.opacityMicromap = opacityMicromap;
+            this.waterAabbs = waterAabbs;
         }
 
         /** A terrain section BLAS split into fixed per-bucket geometries in {@link RtAccel#TERRAIN_BUCKETS} order. */
@@ -321,7 +323,7 @@ public final class RtAccel {
                 total += t;
             }
             return new PreparedBlas(accel, scratch, externalBacking, vertexAddr, indexAddr, maxVertex,
-                    total, false, label, false, false, true, terrainTris, false, null, opacityMicromap);
+                    total, false, label, false, false, true, terrainTris, false, null, opacityMicromap, false);
         }
 
         static PreparedBlas entity(RtAccel accel, RtBuffer scratch, RtBuffer externalBacking, long vertexAddr,
@@ -330,7 +332,12 @@ public final class RtAccel {
             int total = 0;
             for (int t : entityTris) total += t;
             return new PreparedBlas(accel, scratch, externalBacking, vertexAddr, indexAddr, maxVertex,
-                    total, false, label, updatable, update, false, null, true, entityTris, null);
+                    total, false, label, updatable, update, false, null, true, entityTris, null, false);
+        }
+
+        static PreparedBlas water(RtAccel accel, RtBuffer scratch, long aabbAddress, int count, String label) {
+            return new PreparedBlas(accel, scratch, null, aabbAddress, 0, 0, count,
+                    false, label, false, false, true, new int[]{0,0,0,count}, false, null, null, true);
         }
 
         public boolean requestsCompaction() {
@@ -361,6 +368,52 @@ public final class RtAccel {
     public static final int SBT_TERRAIN_SHADOW_OFFSET = SBT_RAY_SHADOW * TERRAIN_BUCKETS;
     public static final int SBT_ENTITY_OFFSET = TERRAIN_BUCKETS * 2;
     public static final int SBT_HIT_GROUP_COUNT = SBT_ENTITY_OFFSET + TERRAIN_BUCKETS * 2;
+
+    /** Water is a separate homogeneous AABB BLAS (VUID-type-03792). Empty AABB buckets 0..2
+     * preserve bucket 3's material/SBT routing without mixing triangle and procedural geometry. */
+    public static PreparedBlas prepareWaterBlas(RtContext ctx,RtBuffer bounds,int primitiveCount,String label) {
+        if(primitiveCount<=0 || bounds.size<(long)primitiveCount*6*Float.BYTES)
+            throw new IllegalArgumentException("Invalid water AABB range");
+        RtBuffer backing=null,scratch=null;RtAccel accel=null;
+        try(var stack=MemoryStack.stackPush()) {
+            var build=waterBuildInfo(stack,bounds.deviceAddress);
+            var sizes=VkAccelerationStructureBuildSizesInfoKHR.calloc(stack).sType$Default();
+            vkGetAccelerationStructureBuildSizesKHR(ctx.vk(),VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                    build.get(0),stack.ints(0,0,0,primitiveCount),sizes);
+            backing=ctx.createAsyncBuffer(sizes.accelerationStructureSize(),VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR,
+                    false,label+" backing");
+            scratch=createScratchBuffer(ctx,sizes.buildScratchSize(),label+" build scratch");
+            accel=createBlasOn(ctx,stack,backing,sizes.accelerationStructureSize(),true,label);
+            return PreparedBlas.water(accel,scratch,bounds.deviceAddress,primitiveCount,label);
+        } catch(Throwable failure) {
+            if(accel!=null)accel.destroy();else if(backing!=null)backing.destroy();
+            if(scratch!=null)scratch.destroy();
+            throw failure;
+        }
+    }
+
+    private static VkAccelerationStructureGeometryKHR.Buffer waterGeometries(MemoryStack stack,long address) {
+        var geometries=VkAccelerationStructureGeometryKHR.calloc(TERRAIN_BUCKETS,stack);
+        for(int i=0;i<TERRAIN_BUCKETS;i++) {
+            var geometry=geometries.get(i).sType$Default()
+                    .geometryType(org.lwjgl.vulkan.KHRAccelerationStructure.VK_GEOMETRY_TYPE_AABBS_KHR)
+                    .flags(VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR);
+            geometry.geometry().aabbs().sType$Default().stride(6L*Float.BYTES).data().deviceAddress(address);
+        }
+        return geometries;
+    }
+
+    /** Identical geometry count/type/flags for the size query and the actual build. LWJGL does not
+     * infer geometryCount from this optional pointer because pGeometries and ppGeometries share it. */
+    static VkAccelerationStructureBuildGeometryInfoKHR.Buffer waterBuildInfo(MemoryStack stack,long address) {
+        var geometries=waterGeometries(stack,address);
+        var build=VkAccelerationStructureBuildGeometryInfoKHR.calloc(1,stack);
+        build.sType$Default().type(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR)
+                .flags(VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR)
+                .mode(VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR)
+                .geometryCount(geometries.capacity()).pGeometries(geometries);
+        return build;
+    }
 
     /**
      * Result of {@link #prepareUpdatableBlasBuild}: the per-frame BUILD op to record, plus the persistent
@@ -942,7 +995,11 @@ public final class RtAccel {
      * the material bucket. Entities use {@link #SBT_ENTITY_OFFSET}; their fixed geometry index then selects
      * opaque or any-hit; the remaining two records in each four-record entity SBT block stay unused.
      */
-    public record Instance(float[] transform3x4, long blasDeviceAddress, int customIndex, int mask, int sbtRecordOffset) {
+    public record Instance(float[] transform3x4, long blasDeviceAddress, int customIndex, int mask,
+                           int sbtRecordOffset, long waterBlasDeviceAddress) {
+        public Instance(float[] transform3x4, long blasDeviceAddress, int customIndex, int mask, int sbtRecordOffset) {
+            this(transform3x4,blasDeviceAddress,customIndex,mask,sbtRecordOffset,0);
+        }
         public Instance(float[] transform3x4, long blasDeviceAddress, int customIndex) {
             this(transform3x4, blasDeviceAddress, customIndex, 0xFF, 0);
         }
@@ -950,7 +1007,23 @@ public final class RtAccel {
         public Instance(float[] transform3x4, long blasDeviceAddress, int customIndex, int mask) {
             this(transform3x4, blasDeviceAddress, customIndex, mask, 0);
         }
+
+        public int physicalCount() { return waterBlasDeviceAddress==0 ? 1 : 2; }
+        public long physicalAddress(int component) {
+            if(component<0 || component>=physicalCount())throw new IndexOutOfBoundsException(component);
+            return component==0 ? blasDeviceAddress : waterBlasDeviceAddress;
+        }
     }
+
+    /** Logical sections keep their water child atomic; Vulkan receives separate homogeneous BLAS instances. */
+    public static int physicalInstanceCount(List<Instance> instances) {
+        int count=0;
+        for(var instance:instances)count=Math.addExact(count,instance.physicalCount());
+        return count;
+    }
+
+    private static int peakWaterInstances;
+    public static int peakWaterInstanceCount() { return peakWaterInstances; }
 
     /** A build-ready TLAS view over a {@link TlasRing} slot's resources (the ring owns and frees them). */
     public static final class PreparedTlas {
@@ -1015,8 +1088,9 @@ public final class RtAccel {
     /** Pack terrain and dynamic instances as two contiguous ranges without a composite-list get per item. */
     public static PreparedTlas prepareTlas(RtContext ctx, List<Instance> baseInstances,
                                            List<Instance> dynamicInstances, TlasRing ring, GraphicsUse graphicsUse) {
-        int baseCount = baseInstances.size();
-        int count = Math.addExact(baseCount, dynamicInstances.size());
+        int baseCount = physicalInstanceCount(baseInstances);
+        int count = Math.addExact(baseCount, physicalInstanceCount(dynamicInstances));
+        peakWaterInstances=Math.max(peakWaterInstances,count-baseInstances.size()-dynamicInstances.size());
         TlasRing.Slot slot = ring.slots[ring.cursor];
         // Complete the slot's prior graphics use before rewriting, rebuilding, or resizing it.
         if (slot != null) {
@@ -1044,18 +1118,21 @@ public final class RtAccel {
     }
 
     // Wrap the mapped Vulkan array in LWJGL structs so its generated accessors own the native ABI/bitfields.
-    private static void writeTlasInstances(List<Instance> instances, long mapped, int firstInstance) {
+    static void writeTlasInstances(List<Instance> instances, long mapped, int firstInstance) {
         VkAccelerationStructureInstanceKHR.Buffer records = VkAccelerationStructureInstanceKHR.create(
-                mapped + (long) firstInstance * VkAccelerationStructureInstanceKHR.SIZEOF, instances.size());
+                mapped + (long) firstInstance * VkAccelerationStructureInstanceKHR.SIZEOF, physicalInstanceCount(instances));
+        int cursor=0;
         for (int i = 0, count = instances.size(); i < count; i++) {
             Instance instance = instances.get(i);
-            VkAccelerationStructureInstanceKHR record = records.get(i);
-            record.transform().matrix().put(instance.transform3x4());
-            record.instanceCustomIndex(instance.customIndex())
+            for(int component=0;component<instance.physicalCount();component++) {
+                VkAccelerationStructureInstanceKHR record = records.get(cursor++);
+                record.transform().matrix().put(instance.transform3x4());
+                record.instanceCustomIndex(instance.customIndex())
                     .mask(instance.mask())
                     .instanceShaderBindingTableRecordOffset(instance.sbtRecordOffset())
-                    .flags(VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR)
-                    .accelerationStructureReference(instance.blasDeviceAddress());
+                    .flags(component==0 ? VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR : 0)
+                    .accelerationStructureReference(instance.physicalAddress(component));
+            }
         }
     }
 
@@ -1227,6 +1304,13 @@ public final class RtAccel {
     /** Record a terrain section's two-geometry (opaque + alpha) BUILD. Always a fresh BUILD — terrain
      *  sections are never refit in place (re-extraction allocates a new BLAS), so no UPDATE branch. */
     private static void recordTerrainBlasBuild(RtContext ctx, VkCommandBuffer cmd, MemoryStack stack, PreparedBlas b) {
+        if(b.waterAabbs) {
+            var build=waterBuildInfo(stack,b.vertexAddr);
+            build.get(0).dstAccelerationStructure(b.accel.handle).scratchData().deviceAddress(scratchAddress(ctx,b.scratch));
+            var ranges=terrainBuildRanges(stack,b.terrainTris);
+            vkCmdBuildAccelerationStructuresKHR(cmd,build,stack.pointers(ranges.address()));
+            return;
+        }
         boolean compact = b.requestsCompaction();
         if (compact) {
             VK10.vkCmdResetQueryPool(cmd, b.accel.compactionQueryPool, 0, 1);

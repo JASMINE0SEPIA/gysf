@@ -113,6 +113,49 @@ float referencePatch(WaterPatch patch,float3 ro,float3 rd,float time,float footp
     return -1.0;
 }
 
+uint runtimePrimitiveChecks(out uint count,out float maxNormalError) {
+    uint failures=0;count=0;maxNormalError=0;
+    // Full-sphere normals cover both viewed sides, poles, axes and the octahedral seam.
+    for(int i=0;i<=32;i++)for(int j=0;j<64;j++) {
+        float y=-1.0+2.0*float(i)/32.0,angle=float(j)*6.28318530718/64.0;
+        float radius=sqrt(max(0.0,1.0-y*y));
+        float3 normal=float3(radius*cos(angle),y,radius*sin(angle));
+        float error=length(normal-unpackWaterGuideNormal(packWaterGuideNormal(normal)));
+        count++;maxNormalError=max(maxNormalError,error);
+        if(!isfinite(error)||error>.0001)failures++;
+        float3 current=normalize(float3(f16tof32(f32tof16(normal.x)),f16tof32(f32tof16(normal.y)),f16tof32(f32tof16(normal.z))));
+        error=length(current-unpackWaterGuideNormal(packPreviousWaterGuideNormal(normal)));
+        count++;maxNormalError=max(maxNormalError,error);
+        if(!isfinite(error)||error>.0001)failures++;
+    }
+    WaterPrimitive p;p.v0=float4(0,15.875,0,1);p.v1=float4(0,15.875,1,1);p.v2=float4(1,16,1,0);
+    p.rectangle=float4(0,0,1,1);p.shore=float4(1);
+    for(int cell=-1;cell<=1;cell++)for(int crest=-1;crest<=1;crest++) {
+        float3 translation=float3(cell*4352,48,-cell*4352);
+        float3 position=translation+float3(.25,15.90625+float(crest)*.9,.75);
+        float3 owner=primitiveWaterOwnership(p,translation,position);
+        count++;
+        if(length(owner.xz-position.xz)>0||abs(owner.y-63.90625)>1e-5||floor(owner.y/16.0)!=3)failures++;
+    }
+    for(int shore=0;shore<3;shore++)for(int phase=0;phase<8;phase++) {
+        p.shore=shore==0?float4(1):shore==1?float4(0):float4(0,1,1,1);
+        WaterPatch patch=primitiveWaterPatch(p,float3(0));
+        float time=float(phase)*.37,previous=time-.016,height,oldHeight;float2 gradient;
+        patchField(patch,float2(.25,.75),time,0,height,gradient);
+        patchField(patch,float2(.25,.75),previous,0,oldHeight,gradient);
+        float3 position=float3(.25,15.90625+height,.75);
+        WaterWaves waves=primitiveWaterWaves(p,float3(0),position,2,true,time,previous);
+        float xp,xm,zp,zm;float2 unused;
+        patchField(patch,float2(.251,.75),previous,0,xp,unused);patchField(patch,float2(.249,.75),previous,0,xm,unused);
+        patchField(patch,float2(.25,.751),previous,0,zp,unused);patchField(patch,float2(.25,.749),previous,0,zm,unused);
+        float3 expectedNormal=normalize(float3(-.125-(xp-xm)/.002,1,-(zp-zm)/.002));
+        count++;
+        if(length(waves.previousNormal-expectedNormal)>.001||abs(position.y-waves.motionPrev.y-15.90625-oldHeight)>1e-5
+                ||length(waves.position-position)>0||length(waves.geometricNormal-waves.normal)>0)failures++;
+    }
+    return failures;
+}
+
 [shader("compute")]
 [numthreads(1,1,1)]
 void patchProbe(uint3 id:SV_DispatchThreadID) {
@@ -190,4 +233,6 @@ void patchProbe(uint3 id:SV_DispatchThreadID) {
     result[13]=gradientFailures;result[14]=asuint(maxGradientError);result[15]=boundsFailures;
     result[16]=curvatureFailures;result[17]=asuint(maxCurvatureFraction);
     uint flatCount;result[18]=flatPrimitiveChecks(flatCount);result[19]=flatCount;
+    uint runtimeCount;float maxNormalError;
+    result[20]=runtimePrimitiveChecks(runtimeCount,maxNormalError);result[21]=runtimeCount;result[22]=asuint(maxNormalError);
 }

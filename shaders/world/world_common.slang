@@ -326,6 +326,7 @@ public struct Payload {
     public uint   emissionSss; // packHalf2x16(emission, sss)
     public uint   iorTransmission; // packHalf2x16(IOR, transmission factor)
     public uint   rayCone;     // packHalf2x16(width, spread)
+    public uint   previousWaterNormal; // octahedral snorm16x2, read only for PAYLOAD_FINITE_WATER
 };
 
 public static const uint PAYLOAD_SHOW_CELESTIAL = 4u;
@@ -338,6 +339,7 @@ public static const uint PAYLOAD_WEATHER = 512u;
 // ends. No NEE, no hand light, no RIS, no SHaRC and no indirect bounce, so no scene light (a
 // nearby torch, the sun, GI) can ever illuminate or reflect off the portal's starfield.
 public static const uint PAYLOAD_END_PORTAL_UNLIT = 1024u;
+public static const uint PAYLOAD_FINITE_WATER = 2048u;
 // Set by world.rchit on a terrain hit whose prim carries TERRAIN_PRIM_IN_LIGHT_BUFFER: this emitter is
 // RIS-sampled, so raygen gates its direct-hit emission on diffuse continuation rays (no double count).
 public static const uint PAYLOAD_EMITTER_IN_LIST = 128u;
@@ -455,6 +457,7 @@ public struct Section {
     public uint64_t primAddr;
     public uint64_t uvAddr;
     public uint triBase[4]; // fixed bucket order: solid/cutout/translucent/water
+    public uint64_t waterAddr; // optional finite-water primitive records, separate homogeneous AABB BLAS
 };
 
 // Entity geometry record: packed buffer addresses, motion, and per-geometry triangle bases. Entity BLAS

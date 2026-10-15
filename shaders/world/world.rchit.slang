@@ -10,8 +10,9 @@ import world_common;
 import math;
 import portals;
 import voxy;
-
-[[vk::push_constant]] WorldPushConstants pc;
+import world_core;
+import water_primitive;
+import water;
 
 [[vk::binding(2, 0)]] Sampler2D blockAlbedoAtlas;
 // Independent bindless arrays: per-draw entity albedo slots and compact canonical material-page bundles.
@@ -46,7 +47,6 @@ uint materialEmissionSource(MaterialHeader header, float emission) {
 // tracer already computes its own AO from sky-visibility rays (avoid double-darkening).
 static const float NORMAL_AO_STRENGTH = 0.5;
 
-static const float RAY_CONE_MIN_WIDTH = 1.0e-5;
 static const float RAY_CONE_MIN_TEXEL_FOOTPRINT = 1.0e-4;
 static const float RAY_CONE_MAX_LOD = 12.0;
 
@@ -501,6 +501,24 @@ static const float GLINT_EMISSION = 3.0;
 // linear space, modulated by the texel value; packs that ship an actual colour are used as-is.
 static const float3 GLINT_GRAYSCALE_TINT = float3(1.30, 0.42, 1.55);
 
+void payloadSetFiniteWater(inout Payload result,Section section,uint primitiveIndex,float3 tint,MaterialHeader material) {
+    worldPush=ConstPtr<WorldPush>(pc.worldPushAddr)[0];
+    WaterPrimitive primitive=ConstPtr<WaterPrimitive>(section.waterAddr)[primitiveIndex];
+    float3x4 transform=ObjectToWorld3x4();
+    float3 translation=float3(transform[0][3],transform[1][3],transform[2][3]);
+    float3 position=WorldRayOrigin()+WorldRayDirection()*RayTCurrent();
+    WaterWaves waves=primitiveWaterWaves(primitive,translation,position,RayTCurrent(),
+            waterWavesEnabled(),worldPush.waterAnchor.x,worldPush.waterAnchor.z);
+    bool entering=dot(WorldRayDirection(),waves.normal)<0;
+    float flip=entering?1.0:-1.0;
+    result.albedo=half3(tint);result.normal=half3(waves.normal*flip);result.hitT=RayTCurrent();
+    result.motionPrev=half3(waves.motionPrev);result.f0=half3(0.02h,0.02h,0.02h);
+    result.previousWaterNormal=packPreviousWaterGuideNormal(waves.previousNormal*flip);
+    payloadSetPacked(result,MATERIAL_WATER,material.params.x,0,0,0,material.params.z,material.params.w,EMISSION_SOURCE_NONE);
+    result.flags|=PAYLOAD_FINITE_WATER;
+    payloadSetDielectric(result,MATERIAL_WATER,entering);
+}
+
 [shader("closesthit")]
 void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) {
     float2 attribs = attr.barycentrics;
@@ -554,6 +572,10 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
         }
 
         if (dhWater) {
+            if(sec.waterAddr!=0 && textured) {
+                payloadSetFiniteWater(payload,sec,PrimitiveIndex(),dhColour,dhHeader);
+                return;
+            }
             payload.albedo = half3(dhColour);
             payload.normal = half3(dn);
             payload.hitT = RayTCurrent();
@@ -818,6 +840,10 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
     // Water is a clear dielectric: biome tint + geometric normal, never the still/flow atlas sprite.
     // That 16×16 repeating square is the azulejo Animated Water replaces with a height field in raygen.
     if (materialHeader.model == MATERIAL_WATER) {
+        if(sec.waterAddr!=0) {
+            payloadSetFiniteWater(payload,sec,PrimitiveIndex(),tint,materialHeader);
+            return;
+        }
         if (dot(n, -WorldRayDirection()) < 0.0) n = -n;
         payload.albedo = half3(tint);
         payload.normal = half3(n);

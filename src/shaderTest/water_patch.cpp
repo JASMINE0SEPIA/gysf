@@ -9,7 +9,7 @@ using RaytracingAccelerationStructure=void*;
 #include <string>
 float f(uint32_t u){float value;std::memcpy(&value,&u,4);return value;}
 int main(int argc,char** argv){
- std::array<uint32_t,20> out{};std::vector<Vector<float,4>> rays(4096);
+ std::array<uint32_t,23> out{};std::vector<Vector<float,4>> rays(4096);
  std::string rayTable,geometry;
  for(int i=1;i<argc;i++) {
   std::string arg=argv[i];
@@ -32,9 +32,11 @@ int main(int argc,char** argv){
           <<" analyticClipCases="<<out[12]<<" analyticClipFailures="<<out[11]
           <<" gradientFailures="<<out[13]<<" maxGradientError="<<f(out[14])<<" boundsFailures="<<out[15]
           <<" curvatureFailures="<<out[16]<<" maxCurvatureFraction="<<f(out[17])
-          <<" flatPrimitiveCases="<<out[19]<<" flatPrimitiveFailures="<<out[18]<<'\n';
+          <<" flatPrimitiveCases="<<out[19]<<" flatPrimitiveFailures="<<out[18]
+          <<" runtimeCases="<<out[21]<<" runtimeFailures="<<out[20]<<" maxGuideNormalError="<<f(out[22])<<'\n';
  if(!rayTable.empty()){std::ofstream file(rayTable);if(!file)return 2;file<<"index,hit_t,reference_t,distance_error,reference_disagreement\n"<<std::setprecision(9);
   for(size_t i=0;i<rays.size();i++)file<<i<<','<<rays[i].x<<','<<rays[i].y<<','<<rays[i].z<<','<<rays[i].w<<'\n';}
  return out[1]==4096 && out[0]==0 && out[2]>0 && out[3]>0 && out[4]==0 && out[5]==0 && out[10]==0
-     && out[11]==0 && out[12]==21 && out[13]==0 && out[15]==0 && out[16]==0 && out[18]==0 && out[19]==10?0:1;
+     && out[11]==0 && out[12]==21 && out[13]==0 && out[15]==0 && out[16]==0 && out[18]==0 && out[19]==10
+     && out[20]==0 && out[21]==4257?0:1;
 }

@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * registry, and published static-instance list here while {@link RtTerrain} retains publication order.
  */
 final class RtSectionTable {
-    private static final int SECTION_ENTRY_BYTES = 32;
+    static final int SECTION_ENTRY_BYTES = dev.comfyfluffy.caustica.rt.gen.SectionData.BYTE_SIZE;
     RtBuffer buffer;
     int capacity;
     int nextSlot;
@@ -163,13 +163,14 @@ final class RtSectionTable {
     void write(SectionGeom geom) {
         long offset = (long) geom.slot * SECTION_ENTRY_BYTES;
         long base = buffer.mapped + offset;
-        MemoryUtil.memPutLong(base, geom.material.deviceAddress);
-        MemoryUtil.memPutLong(base + 8, geom.uvs.deviceAddress);
-        MemoryUtil.memPutInt(base + 16, geom.triBase[0]);
-        MemoryUtil.memPutInt(base + 20, geom.triBase[1]);
-        MemoryUtil.memPutInt(base + 24, geom.triBase[2]);
-        MemoryUtil.memPutInt(base + 28, geom.triBase[3]);
+        writeRecord(base,geom);
         markDirty(offset, SECTION_ENTRY_BYTES);
+    }
+
+    static void writeRecord(long address,SectionGeom geom) {
+        new dev.comfyfluffy.caustica.rt.gen.SectionData(geom.material.deviceAddress,geom.uvs.deviceAddress,
+                geom.triBase,geom.water!=null ? geom.water.deviceAddress : 0)
+                .write(MemoryUtil.memByteBuffer(address,SECTION_ENTRY_BYTES));
     }
 
     /** Publish every copy/patch made to the writable generation with one VMA flush. */
@@ -190,7 +191,8 @@ final class RtSectionTable {
     RtAccel.Instance instanceFor(SectionGeom geom, int rbx, int rby, int rbz) {
         float[] xform = {1, 0, 0, geom.sx - rbx, 0, 1, 0, geom.sy - rby,
                 0, 0, 1, geom.sz - rbz};
-        return new RtAccel.Instance(xform, geom.blas.deviceAddress, geom.slot);
+        return new RtAccel.Instance(xform, geom.blas.deviceAddress, geom.slot,0xFF,0,
+                geom.waterBlas!=null ? geom.waterBlas.deviceAddress : 0);
     }
 
     /** GPU residency for one section: shader attributes + compacted BLAS + world section origin. */
@@ -199,6 +201,8 @@ final class RtSectionTable {
         final RtBuffer uvs;
         final RtBuffer material;
         final RtAccel blas;
+        final RtBuffer water;
+        final RtAccel waterBlas;
         final int[] triBase;
         final int sx;
         final int sy;
@@ -209,11 +213,12 @@ final class RtSectionTable {
         int instanceIndex = -1;
 
         SectionGeom(long key, RtBuffer uvs, RtBuffer material,
-                    RtAccel blas, int[] triBase, int sx, int sy, int sz, float[] lights) {
+                    RtAccel blas, RtBuffer water, RtAccel waterBlas, int[] triBase, int sx, int sy, int sz, float[] lights) {
             this.key = key;
             this.uvs = uvs;
             this.material = material;
             this.blas = blas;
+            this.water=water;this.waterBlas=waterBlas;
             this.triBase = triBase;
             this.sx = sx;
             this.sy = sy;
@@ -223,6 +228,8 @@ final class RtSectionTable {
 
         void destroy() {
             blas.destroy();
+            if(waterBlas!=null)waterBlas.destroy();
+            if(water!=null)water.destroy();
             material.destroy();
             uvs.destroy();
         }

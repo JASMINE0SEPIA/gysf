@@ -3,7 +3,9 @@
 `RtWaterGeometry` is the shared CPU encoder intended for near terrain and
 external LOD water. `water_primitive.slang` decodes its exact packet and calls
 the finite-water solver now shared from `shaders/world/water_patch.slang`.
-The game pipeline does **not** select these primitives yet. The installed
+The development pipeline can select them with `-Dgysf.rt.finiteWater=true`.
+The gate remains off by default while shoreline and camera-medium work continues;
+see [the runtime integration record](WATER-RUNTIME-2026-10-15.md). The installed
 0.6.2/Vulkan.8 pair retains its previous behavior and hashes.
 
 ## Packet and geometry rules
@@ -89,9 +91,10 @@ python scripts/Analyze-WaterGpu.py artifacts/packet-rays.csv artifacts/packet-tr
 python scripts/Analyze-WaterGpu.py artifacts/scene-rays.csv artifacts/packet-scene --finite-patch
 ```
 
-Remaining integration follows WATER-PATCH-INTEGRATION.md: shared shoreline
-data, actual terrain/LOD upload and retirement, mixed triangle/AABB geometry,
-SBT routing and intersection-stage visibility, optical payload/continuations,
-guides and camera-medium handling. Production selection remains disabled until
-these paths and the game fixtures are verified. Development builds use the
+The gated game path now supplies terrain/LOD upload, retirement, separate
+homogeneous triangle/AABB BLAS instances, SBT routing, intersection-stage
+visibility and finite-hit optical/guide data. Shared shoreline data,
+camera-medium handling and the remaining game qualification still follow
+WATER-PATCH-INTEGRATION.md. Default selection remains disabled until
+these requirements are verified. Development builds use the
 separate 0.7.0 version; they are not the installed playable 0.6.2 artifact.

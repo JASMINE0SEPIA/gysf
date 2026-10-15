@@ -152,7 +152,7 @@ abstract class CompileShaders extends DefaultTask {
 		def outDirFile = outDir.get().asFile
 		// Slang stages are named <name>.<stage>.slang (world.rahit.slang → world.rahit.spv); module files
 		// like world_common.slang match no stage glob and are picked up only via `import`.
-		def stageIncludes = ["rgen", "rchit", "rahit", "rmiss", "rcall", "comp", "vert", "frag"]
+		def stageIncludes = ["rgen", "rchit", "rahit", "rmiss", "rint", "rcall", "comp", "vert", "frag"]
 				.collectMany { stage -> ["**/*.${stage}", "**/*.${stage}.slang"] }
 		def validate = { File spv ->
 			execOps.exec {
@@ -640,7 +640,7 @@ tasks.register("verifyModJar") {
 					zip.getEntry("META-INF/LICENSE.md") == null) {
 				throw new GradleException("Missing compiled entrypoint or license")
 			}
-			["world.rgen.spv", "world.rchit.spv", "world.rahit.spv", "world.rmiss.spv",
+			["world.rgen.spv", "world.rchit.spv", "world.rahit.spv", "world.rmiss.spv", "world_water.rint.spv",
 			 "world_primary.rgen.spv", "shadow.rmiss.spv", "display.comp.spv", "svgf_reproject.comp.spv",
 			 "exposure_hist.comp.spv", "sdr_present.comp.spv", "hdr_ui_composite.comp.spv",
 			 "overlay_fullscreen_triangle.vert.spv", "block_outline.vert.spv"].each { shader ->

@@ -45,6 +45,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private String originalMemoryLimit;
     private long maxMemoryDeferrals;
     private boolean sawDriverBudget, observedBudgetRecovery;
+    private int maxNearWaterInstances,maxLodWaterInstances;
     private int pressureFallbackFrames;
     private boolean observedReducedProvider;
     private java.util.concurrent.CompletableFuture<Void> reload;
@@ -101,6 +102,15 @@ public final class GysfSmokeClient implements ClientModInitializer {
         if (RtComposite.INSTANCE.hasFailed()) throw new IllegalStateException("RT compositor failed");
         maxMeshes=Math.max(maxMeshes,VoxyCompat.meshes().size());
         maxRtSections=Math.max(maxRtSections,dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.residentSectionCount());
+        if(dev.comfyfluffy.caustica.rt.terrain.RtWaterGeometry.runtimeEnabled()) {
+            var near=dev.comfyfluffy.caustica.rt.terrain.RtTerrain.currentOrNull();
+            if(near!=null && near.staticInstances()!=null) {
+                int count=0;for(var instance:near.staticInstances())if(instance.waterBlasDeviceAddress()!=0)count++;
+                maxNearWaterInstances=Math.max(maxNearWaterInstances,count);
+            }
+            maxLodWaterInstances=Math.max(maxLodWaterInstances,
+                    dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.waterInstanceCount());
+        }
         var memoryContext=dev.comfyfluffy.caustica.rt.RtContext.currentOrNull();
         if(memoryContext!=null) {
             maxMemoryDeferrals=Math.max(maxMemoryDeferrals,memoryContext.lodMemory().deferralCount());
@@ -308,6 +318,12 @@ public final class GysfSmokeClient implements ClientModInitializer {
             long textured=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.texturedBuildCount();
             long leafCutouts=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.leafCutoutQuadCount();
             var lod=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE;
+            if(dev.comfyfluffy.caustica.rt.terrain.RtWaterGeometry.runtimeEnabled()) {
+                int packed=dev.comfyfluffy.caustica.rt.accel.RtAccel.peakWaterInstanceCount();
+                if(maxNearWaterInstances==0 || maxLodWaterInstances==0 || packed<2)
+                    throw new IllegalStateException("Finite water was not published in both near and LOD TLAS inputs");
+                System.out.println("GYSF_FINITE_WATER: nearChildren="+maxNearWaterInstances+" lodChildren="+maxLodWaterInstances+" packedPeak="+packed);
+            }
             if(WATER_FIXTURE && lod.waterQuadCount()==0) throw new IllegalStateException("Textured LOD water was not converted");
             if(Boolean.getBoolean("gysf.smoke.requirePreciseFluids") && lod.preciseFluidQuadCount()==0)
                 throw new IllegalStateException("API 6 precise fluid geometry was not converted");

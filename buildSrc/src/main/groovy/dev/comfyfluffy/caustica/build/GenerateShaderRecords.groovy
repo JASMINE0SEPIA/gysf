@@ -239,6 +239,14 @@ abstract class GenerateShaderRecords extends DefaultTask {
         Map restirReservoirType = restirProbeArray.type.elementType as Map
         int restirReservoirByteSize = restirProbeArray.type.uniformStride as int
 
+        def sectionParameter = reflection.parameters.find { it.name == "sectionLayoutProbe" }
+        def sectionArray = sectionParameter?.type?.resultType?.fields?.find { it.name == "values" }
+        if (sectionArray?.type?.kind != "array" || sectionArray.type.elementType?.name != "Section") {
+            throw new GradleException("unexpected Section reflection probe shape")
+        }
+        Map sectionType = sectionArray.type.elementType as Map
+        int sectionByteSize = sectionArray.type.uniformStride as int
+
         def pushParameter = reflection.parameters.find { it.name == "pushConstantsLayoutProbe" }
         if (pushParameter?.type?.elementType?.name != "WorldPushConstants") {
             throw new GradleException("Slang reflection omitted pushConstantsLayoutProbe")
@@ -260,5 +268,7 @@ abstract class GenerateShaderRecords extends DefaultTask {
                 generateJava(materialHeaderType, materialHeaderByteSize, "MaterialHeaderData"), "UTF-8")
         new File(packageDir, "RestirReservoirData.java").setText(
                 generateJava(restirReservoirType, restirReservoirByteSize, "RestirReservoirData"), "UTF-8")
+        new File(packageDir, "SectionData.java").setText(
+                generateJava(sectionType, sectionByteSize, "SectionData"), "UTF-8")
     }
 }

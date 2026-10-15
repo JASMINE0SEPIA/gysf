@@ -2,6 +2,9 @@ package dev.comfyfluffy.caustica.rt.terrain;
 
 /** Shared near/LOD water input for procedural traversal. Coordinates remain section-local. */
 public final class RtWaterGeometry {
+    private static final boolean RUNTIME_ENABLED=Boolean.getBoolean("gysf.rt.finiteWater");
+    /** Development gate until the shared shore field and optical/guide paths are qualified. */
+    public static boolean runtimeEnabled() { return RUNTIME_ENABLED; }
     /** Three position/metadata lanes, quad rectangle, shared shoreline weights. */
     public static final int PRIMITIVE_FLOATS = 20;
     public static final int PRIMITIVE_BYTES = PRIMITIVE_FLOATS * Float.BYTES;

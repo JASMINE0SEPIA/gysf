@@ -14,8 +14,8 @@
 import world_common;
 import math;
 import voxy;
-
-[[vk::push_constant]] WorldPushConstants pc;
+import world_core;
+import water_primitive;
 
 [[vk::binding(2, 0)]] Sampler2D blockAlbedoAtlas;
 [[vk::binding(0, 1)]] Sampler2D entityAlbedoTex[];
@@ -91,6 +91,12 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
         bool textured = (pr.flags & PRIM_VOXY) != 0u;
         float3 ownershipNormal = textured ? voxyOwnershipNormal(pr.flags) : pr.normal.xyz;
         float3 hitPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+        if(sec.waterAddr!=0 && GeometryIndex()==BUCKET_WATER) {
+            float3x4 transform=ObjectToWorld3x4();
+            float3 translation=float3(transform[0][3],transform[1][3],transform[2][3]);
+            WaterPrimitive primitive=ConstPtr<WaterPrimitive>(sec.waterAddr)[PrimitiveIndex()];
+            hitPos=primitiveWaterOwnership(primitive,translation,hitPos);
+        }
         if (vanillaRtSectionReady(hitPos, ownershipNormal)) {
             // Suppress this exact LOD section only after its real RT replacement is published, so the
             // transition ring never shows a hole or double geometry.

@@ -232,7 +232,9 @@ public void resolveTransmissionGuide(float3 origin, float3 transmittedDir,
         float3 geometricNormal = normalize(payload.normal);
         float3 interfaceNormal = geometricNormal;
         WaterWaves waterSurf = flatWaterWaves(interfacePos, payload.hitT, geometricNormal);
-        if (isWater && waterWavesEnabled()) {
+        if(isWater && finiteWaterHit()) {
+            waterSurf=finiteWaterFromPayload(interfacePos,payload.hitT,interfaceNormal);
+        } else if (isWater && waterWavesEnabled()) {
             float waterFootprint = rayConeWidth
                     / max(abs(dot(-direction, geometricNormal)), 0.2);
             waterSurf = evaluateWaterWaves(ro, direction, payload.hitT, geometricNormal,

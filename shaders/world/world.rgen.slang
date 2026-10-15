@@ -304,7 +304,9 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex,
             // world-stable: per-wave phases carry the full terrain origin while hits stay rebased.
             float3 geometricNormal = n; // unrippled; ray origins offset along this
             WaterWaves waterSurf = flatWaterWaves(hitPos, payload.hitT, geometricNormal);
-            if (isWater && waterWaves) {
+            if(isWater && finiteWaterHit()) {
+                waterSurf=finiteWaterFromPayload(hitPos,payload.hitT,n);
+            } else if (isWater && waterWaves) {
                 float waterFootprint = rayConeWidth / max(abs(dot(-rd, geometricNormal)), 0.2);
                 waterSurf = evaluateWaterWaves(ro, rd, payload.hitT, geometricNormal,
                         worldPush.waterAnchor.x, worldPush.waterAnchor.x, waterFootprint);
