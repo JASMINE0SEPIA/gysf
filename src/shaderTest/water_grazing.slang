@@ -4,6 +4,7 @@ import water_grazing_reference;
 import water_test_frame;
 import world_core;
 RWStructuredBuffer<uint> result;
+RWStructuredBuffer<float4> rayResults;
 [shader("compute")]
 [numthreads(1,1,1)]
 void grazingProbe(uint3 id:SV_DispatchThreadID) {
@@ -24,19 +25,21 @@ void grazingProbe(uint3 id:SV_DispatchThreadID) {
         float hitT=(side==0?WAVE_MAX_HEIGHT*strength+0.5:0.5)/sin(theta);
         float3 ro=plane-rd*hitT;
         float time=float(ti)*1.37,footprint=fi==0?0.0:fi==1?0.5:fi==2?2.0:8.0;
+        float referenceT=-1.0,rayError=-1.0,referenceDisagreement=0.0;
 #if GYSF_GRAZING_PROTOTYPE
         uint work; bool exhausted;
         float rootT=strictWaveHit(ro,rd,hitT,n,time,footprint,work,exhausted);
         WaterWaves w=flatWaterWaves(ro+rd*rootT,rootT,n);
         exhaustions+=exhausted?1:0; maxWork=max(maxWork,work);totalWork+=work;
-        if(sample==0 && fi==0 && ti==0) {
+        if(GYSF_GRAZING_FULL_REFERENCE!=0 || (sample==0 && fi==0 && ti==0)) {
             float3 actualPlane=ro+rd*hitT;
-            float referenceA=denseWaterHit(actualPlane,rd,hitT,time,strength,0.01);
-            float referenceB=denseWaterHit(actualPlane,rd,hitT,time,strength,0.005);
+            float referenceA=denseWaterHit(actualPlane,rd,hitT,time,strength,0.01,footprint);
+            float referenceB=denseWaterHit(actualPlane,rd,hitT,time,strength,0.005,footprint);
             float error=abs(rootT-referenceB);
-            if(referenceA<0 || referenceB<0 || abs(referenceA-referenceB)>0.001) referenceDisagreements++;
+            if(referenceA<0 || referenceB<0 || abs(referenceA-referenceB)>0.001) {referenceDisagreements++;referenceDisagreement=1.0;}
             if(error>0.02) referenceFailures++;
             worstRootError=max(worstRootError,error);references++;
+            referenceT=referenceB;rayError=error;
         }
 #else
         WaterWaves w=evaluateWaterWaves(ro,rd,hitT,n,time,time-0.016,footprint);
@@ -44,6 +47,7 @@ void grazingProbe(uint3 id:SV_DispatchThreadID) {
         float residual=abs(w.position.y-plane.y-waterWaveHeight(w.position.xz,time,footprint));
         if(residual>worst) {worst=residual;worstAngle=angles[ai];worstStrength=strength;worstTime=time;}
         if(!isfinite(residual)||residual>0.001) failures++;
+        rayResults[cases]=float4(w.hitT,referenceT,rayError,referenceDisagreement);
         cases++;
     }
     result[0]=failures;result[1]=cases;result[2]=asuint(worst);result[3]=asuint(worstAngle);

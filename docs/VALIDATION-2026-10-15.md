@@ -972,3 +972,15 @@ closest-root and finite-water-domain/shoreline checks plus measured GPU cost.
 The current production grazing limitation remains open; do not interpret the
 candidate's passing diagnostic or the image runs as its repair. No PCL files,
 player saves or native production artifacts were changed.
+
+## Expanded grazing and finite-patch Vulkan prototypes
+
+The subsequent [finite-water investigation](WATER-PATCH-INTEGRATION.md) expands
+the unbounded candidate to 4096 dense nearest-root references and measures it
+on the actual GPU. It also introduces a finite-triangle, shared-shore-envelope
+candidate and tests it through both native compute and real procedural
+BLAS/TLAS ray tracing. The eight-triangle scene has zero hit/miss/distance
+failures against 4096 dense CPU references and clean Vulkan synchronization
+validation. These remain shader-test prototypes; the production grazing proxy
+is still unchanged. The linked report records exact timings, limits and the
+remaining game integration requirements.
