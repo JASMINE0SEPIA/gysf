@@ -65,12 +65,38 @@ This is not described as a validation-clean default run. Revalidation with a
 fixed checker remains useful. Unrelated Windows OSHI performance-counter
 registry warnings also occur during Minecraft startup.
 
-## Visual and acceptance limits
+## Initial colour-proxy acceptance limits
 
 Runtime data flow is demonstrated, not final visual acceptance. The current
 colour proxy loses per-texel alpha/PBR and sub-block/fluid shape details. Sparse
 visited terrain can leave incomplete far coverage. A screenshot cannot prove
 seam-free lighting, temporal stability, correct reflections or production
-performance. Those remain explicit work for the textured API consumer.
+performance. These limits describe the initial 0.1.0 prototype above.
+
+## Textured consumer: gysf 0.2.0 and vooxxy Vulkan 5
+
+Both projects pass `check`: 132 gysf tests and 22 provider API tests, with zero
+failures/errors. The nine added CPU tests independently check face orientation,
+sub-block depth boundaries, greedy UV repetition, fluid top/side heights,
+rebasing, metadata identity, bucket layout and immutable snapshot ownership.
+Shader compilation, SPIR-V validation, reflected ABI and production JAR checks
+also pass. The provider commit is `2b77524e3b080108be7a875e9ea442abf14edfc0`.
+
+| Textured scene | RT frames | Peak source meshes | Peak RT sections | Packed textured batches | Final atlas slot |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Fixed-seed world and dimension round trip | 4420 | 336 | 355 | 1520 | 7 |
+| Added isolated material fixture and dimension round trip | 4166 | 421 | 446 | 1639 | 8 |
+
+Both runs enable DLSS-RR and disable OMM to avoid the installed SDK checker bug.
+They complete movement, resource reload, Nether travel and return, saving and
+shutdown with zero VUID, synchronization hazard, device loss or external-provider
+failure. The typed path is required by the harness: it rejects zero textured
+batch count, an empty typed snapshot or an unbound atlas after returning.
+
+The production renderer now samples per-face RGBA, applies conditional biome
+tint, clips alpha and preserves Voxy's fractional/fluid geometry. Full per-sprite
+normal/specular PBR, sampled distant emitters, comprehensive handoff/reflection
+acceptance and total-residency memory pressure testing remain open. Sparse
+visited terrain still leaves gaps in the isolated camera's uncached horizon.
 
 Raw logs and screenshots stay locally under ignored `artifacts/2026-10-15/`.

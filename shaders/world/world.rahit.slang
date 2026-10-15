@@ -103,6 +103,10 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
         float3 dhColour = pr.tint.rgb;
         if (textured) {
             uint slot = ConstPtr<WorldPush>(pc.worldPushAddr)[0].voxyTextureSlot;
+            if (slot == 0u) {
+                IgnoreHit();
+                return;
+            }
             voxySample = voxyTexel(pr, voxyUv(sec, tri, bary), payload.rayCone, RayTCurrent(),
                     entityAlbedoTex[NonUniformResourceIndex(slot)]);
             if (voxySample.a < (((pr.flags & 32u) != 0u) ? ALPHA_CUTOFF : 0.01)) {

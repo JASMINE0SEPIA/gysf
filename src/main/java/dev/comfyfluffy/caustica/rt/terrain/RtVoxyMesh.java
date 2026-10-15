@@ -11,6 +11,7 @@ import java.util.function.ToIntFunction;
 final class RtVoxyMesh {
     static final int PRIM_VOXY=0x80000000;
     static final AtomicLong PACKED_BATCHES=new AtomicLong();
+    static final AtomicLong LEAF_CUTOUT_QUADS=new AtomicLong();
     record Slice(DistantHorizonsCompat.LodMesh mesh,int start,int end) {}
     private RtVoxyMesh() {}
 
@@ -35,7 +36,7 @@ final class RtVoxyMesh {
         float[] positions=new float[Math.multiplyExact(count,12)];
         int[] indices=new int[Math.multiplyExact(count,6)];
         float[] uvs=new float[Math.multiplyExact(count,12)], prims=new float[Math.multiplyExact(count,24)];
-        int nextOrdinary=0,nextWater=ordinary;
+        int nextOrdinary=0,nextWater=ordinary,leafCutouts=0;
         float[] p=new float[12],uv=new float[8];
         for(var slice:slices) {
             var source=slice.mesh;
@@ -63,6 +64,7 @@ final class RtVoxyMesh {
                 boolean cutout=(data&(1<<22))!=0 || (!model.fluid() && (data&(1<<23))!=0 && ((raw>>>3)&255)!=0);
                 int flags=PRIM_VOXY|face|(((data>>>24)&3)<<3)|(cutout?32:0);
                 if(model.state()!=null && model.state().is(net.minecraft.tags.BlockTags.LEAVES)) flags|=64;
+                if((flags&96)==96) leafCutouts++;
                 int kind=model.water()?1:model.glass()?(model.emission()>0?4:2):model.emission()>0?3:0;
                 int material=resolve.applyAsInt(model);
                 for(int tri=0;tri<2;tri++) {
@@ -87,6 +89,7 @@ final class RtVoxyMesh {
             }
         }
         PACKED_BATCHES.incrementAndGet();
+        LEAF_CUTOUT_QUADS.addAndGet(leafCutouts);
         // Every LOD face traverses any-hit, including solid faces, for the vanilla-ready ownership mask.
         return new RtTerrainMesher.PackedSection(positions,indices,uvs,prims,
                 new int[]{0,ordinary*2,0,waterCount*2},new int[]{0,0,ordinary*2,ordinary*2},new float[0]);

@@ -271,6 +271,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     public long texturedBuildCount() { return RtVoxyMesh.PACKED_BATCHES.get(); }
+    public long leafCutoutQuadCount() { return RtVoxyMesh.LEAF_CUTOUT_QUADS.get(); }
 
     public long emissiveRevision() {
         Proxy proxy = current;

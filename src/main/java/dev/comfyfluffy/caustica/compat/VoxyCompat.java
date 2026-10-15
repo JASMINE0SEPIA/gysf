@@ -59,6 +59,7 @@ public final class VoxyCompat {
 
     /** Borrow the provider-owned atlas only after the current pipeline's descriptor registry exists. */
     public static int bindAtlas() {
+        if(Boolean.getBoolean("gysf.voxy.hideTextured")) { boundAtlasSlot=0; return 0; }
         long view=API != null && API.textured != null ? API.textured.atlasView() : 0;
         boundAtlasSlot=view==0 ? 0 : dev.comfyfluffy.caustica.rt.entity.RtEntityTextures.INSTANCE
                 .slotForBorrowedView(API.textured.atlasOwner(),view);

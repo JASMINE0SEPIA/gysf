@@ -19,6 +19,8 @@ import java.nio.file.*;
 public final class GysfSmokeClient implements ClientModInitializer {
     private static final String WORLD="gysf-26.3-smoke";
     private static final boolean TEXTURE_FIXTURE=Boolean.getBoolean("gysf.smoke.textureFixture");
+    private static final boolean VISUAL_ONLY=TEXTURE_FIXTURE && Boolean.getBoolean("gysf.smoke.visualOnly");
+    private static final boolean VISUAL_CONTROL=TEXTURE_FIXTURE && (VISUAL_ONLY || Boolean.getBoolean("gysf.smoke.visualControl"));
     private int ticks,worldTicks,maxMeshes,maxRtSections;
     private boolean opened;
     private boolean finished;
@@ -34,6 +36,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
             opened=true;
             client.options.pauseOnLostFocus=false;
             client.options.renderDistance().set(4);
+            client.options.fov().set(70);
             client.getWindow().setWindowed(854,480);
             var flows=client.createWorldOpenFlows();
             if (Files.exists(Path.of("saves",WORLD,"level.dat"))) flows.openWorld(WORLD,()->{throw new IllegalStateException("World open cancelled");});
@@ -64,23 +67,39 @@ public final class GysfSmokeClient implements ClientModInitializer {
             for(String command:commands) client.player.connection.sendCommand(command);
             System.out.println("GYSF_SMOKE: placed isolated textured LOD fixture at z=100");
         }
-        if (worldTicks==500) client.player.connection.sendCommand("tp @s 0 140 0 0 20");
+        if (worldTicks==500) {
+            client.player.connection.sendCommand(TEXTURE_FIXTURE ? "tp @s 0 140 0 0 16" : "tp @s 0 140 0 0 20");
+            if(TEXTURE_FIXTURE) client.options.fov().set(30);
+        }
+        if (worldTicks==890 && TEXTURE_FIXTURE) {
+            System.out.println("GYSF_SMOKE: fixture near-ready="+
+                    dev.comfyfluffy.caustica.rt.terrain.RtTerrain.isSectionReady(new net.minecraft.core.BlockPos(0,112,100)));
+        }
         if (worldTicks==900) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                 image->{try {Files.createDirectories(Path.of("screenshots"));image.writeToFile(Path.of("screenshots","gysf-joint.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
+        if (VISUAL_CONTROL && worldTicks==920) System.setProperty("gysf.voxy.hideTextured","true");
+        if (VISUAL_CONTROL && worldTicks==950) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
+                image->{try {image.writeToFile(Path.of("screenshots","gysf-no-textured-control.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
+        if (VISUAL_CONTROL && worldTicks==980) System.clearProperty("gysf.voxy.hideTextured");
         if (worldTicks==1000) reload=client.reloadResourcePacks();
         if (worldTicks==1350) client.player.connection.sendCommand("execute in minecraft:the_nether run tp @s 0 90 0");
         if (worldTicks==1650) client.player.connection.sendCommand("execute in minecraft:overworld run tp @s 0 140 0");
-        if (worldTicks==2200) {
-            if (reload==null || !reload.isDone()) throw new IllegalStateException("Resource reload incomplete");
-            reload.join();
-            if (!visitedNether || !returnedOverworld) throw new IllegalStateException("Dimension round trip incomplete");
+        if (worldTicks==(VISUAL_ONLY?990:2200)) {
+            if(!VISUAL_ONLY) {
+                if (reload==null || !reload.isDone()) throw new IllegalStateException("Resource reload incomplete");
+                reload.join();
+                if (!visitedNether || !returnedOverworld) throw new IllegalStateException("Dimension round trip incomplete");
+            }
             if (!RtComposite.enabled() || RtComposite.frameCounter()<100) throw new IllegalStateException("RT frames missing");
             if (Boolean.getBoolean("gysf.smoke.vooxxy") && (!VoxyCompat.enabled() || maxMeshes==0 || maxRtSections==0)) throw new IllegalStateException("External ray-traced LOD geometry missing");
             long textured=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.texturedBuildCount();
+            long leafCutouts=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.leafCutoutQuadCount();
             if (Boolean.getBoolean("gysf.smoke.vooxxy") && !Boolean.getBoolean("gysf.voxy.colourProxy")
                     && (textured==0 || VoxyCompat.texturedMeshCount()==0 || VoxyCompat.boundAtlasSlot()==0))
                 throw new IllegalStateException("Textured Voxy geometry or atlas binding missing");
-            System.out.println("GYSF_SMOKE: PASS frames="+RtComposite.frameCounter()+" maxVoxyMeshes="+maxMeshes+" maxRtLodSections="+maxRtSections+" texturedBatches="+textured+" atlasSlot="+VoxyCompat.boundAtlasSlot());
+            if(TEXTURE_FIXTURE && !Boolean.getBoolean("gysf.voxy.colourProxy") && leafCutouts==0)
+                throw new IllegalStateException("Foliage alpha-cutout metadata missing");
+            System.out.println("GYSF_SMOKE: PASS frames="+RtComposite.frameCounter()+" maxVoxyMeshes="+maxMeshes+" maxRtLodSections="+maxRtSections+" texturedBatches="+textured+" atlasSlot="+VoxyCompat.boundAtlasSlot()+" leafCutoutQuads="+leafCutouts);
             finished=true;
             client.disconnectWithSavingScreen();
         }

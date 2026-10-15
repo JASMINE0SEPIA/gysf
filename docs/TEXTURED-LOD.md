@@ -40,7 +40,16 @@ to the 26.3 renderer and existing scheduler. Fluid packing follows vooxxy's
 
 Nine CPU tests check winding, depth boundaries, greedy UV scale, fluid top/side
 heights, rebasing, material identity, bucket order and snapshot ownership.
+The provider retains leaf alpha-cutout metadata when an external renderer owns
+the world, instead of applying standalone Voxy's opaque foliage override.
 `-Dgysf.smoke.textureFixture=true` builds a leaf/plank/brick/glass/slab fixture
 inside the isolated smoke world; it never edits a PCL world. The smoke harness
 also requires nonzero textured batch count and a bound atlas after its dimension
-round trip. GPU and visual observations belong in the validation record.
+round trip. Adding `-Dgysf.smoke.visualOnly=true` instead performs a shorter
+30-degree-FOV visual check, records whether the fixture's near RT section is
+ready, and captures the same camera with the textured LOD hidden. It restores
+the atlas before saving and exit. The developer flag `gysf.voxy.hideTextured`
+affects only these textured LOD hits and does not disable native near terrain.
+`-Dgysf.smoke.visualControl=true` records the same comparison during the full
+resource-reload/dimension lifecycle test instead of shortening it.
+GPU and visual observations belong in the validation record.

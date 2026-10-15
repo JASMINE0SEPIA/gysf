@@ -409,7 +409,7 @@ public struct TerrainPrim {
     public uint aux1;
 };
 
-// Textured LOD records: flags low bits carry face:3, tint mode:2 and alpha-cutout:1.
+// Textured LOD records: flags low bits carry face:3, tint mode:2, alpha-cutout:1 and foliage:1.
 // aux0 is the baked model id; aux1 is the LOD level; normal.w is uniform emission.
 public static const uint PRIM_VOXY = 0x80000000u;
 
