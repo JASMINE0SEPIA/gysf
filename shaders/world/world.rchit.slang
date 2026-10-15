@@ -559,17 +559,17 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
             payload.hitT = RayTCurrent();
             payload.motionPrev = half3(0.0h, 0.0h, 0.0h);
             payload.f0 = half3(0.02h, 0.02h, 0.02h);
-            // An outward crossing can close an existing near/camera water medium using the normal
-            // dielectric handler, including waves. It never pushes a new medium from sparse LOD data.
-            if (dot(WorldRayDirection(), sourceNormal) > 0.0) {
+            // API 5 fluid faces carry outward normals and biome optical tint. Share near water's
+            // complete dielectric path, including entering/exiting media, waves and guide generation.
+            // Legacy DH colour proxies retain their separate sparse-surface approximation.
+            bool entering = dot(WorldRayDirection(), sourceNormal) < 0.0;
+            if (textured || !entering) {
                 payloadSetPacked(payload, MATERIAL_WATER, dhHeader.params.x, 0.0, 0.0, 0.0,
                         dhHeader.params.z, dhHeader.params.w, EMISSION_SOURCE_NONE);
-                payloadSetDielectric(payload, MATERIAL_WATER, false);
+                payloadSetDielectric(payload, MATERIAL_WATER, entering);
                 return;
             }
-            // A coarse LOD voxel is not a watertight column. Entering rays retain a glossy surface
-            // approximation instead of accumulating volume absorption through generated side/bottom
-            // faces. Its optical biome tint must not be multiplied by the baked blue water sprite.
+            // The legacy colour proxy is not a watertight column; do not open an absorbing volume.
             payloadSetPacked(payload, MATERIAL_OPAQUE, 0.075, 0.0, 0.0, 0.0,
                     1.333, 0.0, EMISSION_SOURCE_NONE);
             return;

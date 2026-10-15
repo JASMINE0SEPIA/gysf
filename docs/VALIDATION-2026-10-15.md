@@ -381,3 +381,80 @@ narrow dark-band diagnostics, not a general image-quality score or benchmark.
 Low path caps can still truncate legitimate multi-interface paths, and distant
 water-volume attenuation remains visible. The origin fix addresses false
 self-intersections without changing the bounce budget.
+
+## Shared near/far water path: 0.4.0
+
+API 5 water now selects `MATERIAL_WATER` for entering as well as exiting hits,
+using the near fluid material's parameters and normalized biome tint. Its
+Fresnel, refraction, volume absorption, geometric waves, caustics and guide
+generation therefore follow the same shader path as near water. Legacy DH and
+colour-proxy entry hits keep their separate glossy approximation. This changes
+the typed consumer only; the paired provider remains `20c82bde`.
+
+Reflected guide probes also keep the original BLAS plane in `SpecSurface` and
+use the same wave-aware origin as the radiance continuations. Their returned
+distance is reconstructed from that actual probe origin, not from the displaced
+surface point. This fixes the remaining mismatch between reflected guide and
+radiance origins without changing the payload or provider ABI.
+
+The production 0.4.0 JAR passes all 157 Java tests, shader/SPIR-V, Minecraft ABI
+and JAR checks. The production Slang origin probe passes all 2080 cases and its
+TIR negative control. The JAR excludes both smoke and host-test code. The
+unchanged provider is not rebuilt or retested for this consumer-only change.
+
+The final 2900-tick joint run uses the product-default 4-bounce cap, 854x480,
+1 spp, DLSS-RR, a requested 512-block LOD distance, coverage validation and real
+driver-budget assertions. The water fixture's phase is held still for captures
+and restored before travel. OMM remains disabled for the installed SDK checker.
+
+| Final lifecycle/motion run | Result |
+| --- | ---: |
+| RT frames | 5448 |
+| Peak selected source meshes / resident RT LOD BLAS sections | 1347 / 1052 |
+| Converted textured batches / cumulative water quads | 2360 / 708345 |
+| Replacement groups / validated partitions | 280 / 157 |
+| Peak native LOD allocation bytes / shutdown bytes | 336431744 / 0 |
+| Allocation deferrals / distance reductions | 0 / 0 |
+
+It completes resource reload, Nether/Overworld return, variable-height travel,
+teleport, manual RT refresh, save and shutdown with no Vulkan VUID,
+synchronization hazard, device loss or compositor/coverage failure. The first
+post-reload underwater screenshot is not used for far-water visual acceptance:
+only 30 of 991 new LOD batches are ready near capture time, producing a missing
+far wall while the new atlas/scene repopulates. A resource epoch reset cannot
+keep drawing invalid old-atlas data; repopulation remains progressive.
+
+Two separate `waterCompareOnly` runs remove reload, dimension changes and travel
+from the comparison. Both use the same cameras, frozen wave phase, FOV and
+4-bounce cap. Server checks verify the whole pool centre line. The mixed run
+has 64/129 near-ready centre-line samples and requires the far sample to remain
+LOD-owned; the 12-chunk reference requires all 129/129 samples to be near-ready.
+Both underwater captures have 1037 resident LOD BLAS instances elsewhere in the
+scene, so the comparison does not confuse a just-cleared LOD scene with water.
+
+| Stable visual run | RT frames | Peak native LOD bytes | Shutdown bytes |
+| --- | ---: | ---: | ---: |
+| Mixed near + API 5 water | 3235 | 342157744 | 0 |
+| Full-near pool reference | 3385 | 344005344 | 0 |
+
+Both stable runs finish without Vulkan findings, coverage/compositor failure or
+allocation deferrals. These counts describe completed work, not performance.
+
+![Mixed near and API 5 water](images/water-mixed-final.png)
+![Same camera with the pool entirely near-ready](images/water-full-near-reference.png)
+![Stable mixed underwater view](images/underwater-final.png)
+![Stable full-near underwater reference](images/underwater-full-near-reference.png)
+
+The pool surface, floor and reflections remain close across the two input
+paths, without the broad black band or a missing far wall in these stable
+captures. In the same dark-band ROI used above, the final 4-bounce mixed and
+near-reference counts are 24 and 18 near-black pixels. These are not a causal
+comparison with the earlier 2-bounce counts. Cloud phase, background coverage
+and stochastic samples differ between processes; this is not pixel-equality,
+temporal stability or universal seamless-water acceptance.
+
+API 5 fluid heights still have three-bit 1/8-voxel precision, and distant cells
+still simplify geometry. More precise flow/shoreline heights, refraction-aware
+detail selection, different resource packs and longer travel remain separate
+acceptance work. Source, screenshots, paired JARs and raw records are kept in
+`artifacts/2026-10-15/underwater/`. No PCL files or player saves are changed.

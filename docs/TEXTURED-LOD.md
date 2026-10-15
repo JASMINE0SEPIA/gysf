@@ -55,16 +55,22 @@ cannot fill foliage holes; closest-hit albedo still uses ray-cone mip filtering.
 It preserves water/glass/emission classification
 and block-state material profiles. The baked RGBA atlas does not carry LabPBR
 normal/specular pages, and distant emitters do not yet enter the light-sampling
-hierarchy. Water retains the existing thin glossy LOD approximation. Its biome
+hierarchy. API 5 water uses the same dielectric handler as near water. Its biome
 colour uses the same normalized optical-tint convention as the near fluid
 mesher, without albedo linearization or multiplication by the baked blue water
 sprite. Shadow tint follows the same rule. Water sprite alpha does not remove
-water geometry. An outward crossing uses the existing dielectric water handler
-to exit a near/camera water medium, including its waves and Fresnel response.
-Entering rays keep the glossy approximation: sparse LOD water cannot push a new
-absorbing medium. This aligns tint inputs and permits water exits; transmission,
-volume absorption and waves on entering far-water hits still differ from near
-water, so it is not a complete near/far match.
+water geometry. Entering and exiting crossings share Fresnel, refraction, medium
+absorption, waves, caustics and denoiser guides with the near fluid path. Primary
+TIR, split continuations, secondary rays and reflected guide probes all keep
+their origins off both the waved surface and its undeformed BLAS plane. Guide
+hit positions use the actual biased probe origin. Legacy DH/colour proxies
+retain their glossy entry approximation. API 5 fluid corner quantization and
+coarse cell geometry still limit geometric continuity; shader equality does not
+recover missing or lower-resolution world data.
+Fluid corners use three bits for heights 1/8..1 of a LOD voxel. A still-water
+height of 8/9 therefore becomes 7/8; its world-space error grows with voxel
+scale. More precise heights and refraction-aware detail selection are separate
+geometry work, not something to conceal with a different water shader.
 
 The decoding and atlas-layout reference is `skayla2007/Caustica` at
 `e83674e4d1c4ca02b6321de23cebaf7bb1cc90b6` (`RtVoxyMesh`, `voxy.slang`), adapted
@@ -95,3 +101,25 @@ boundaries, verifies that it spans ready near terrain and unready far terrain,
 records above-water and underwater views, and requires converted LOD water.
 Use it with the full run; `visualOnly` exits before the underwater view.
 GPU and visual observations belong in the validation record.
+
+`-Dgysf.smoke.waterMatrix=true` records frozen-wave underwater controls for hidden
+LOD, flat water, 8 bounces, and raw 8/2 bounces in one isolated process. This
+shorter 1720-tick diagnostic skips dimensions and travel. Adding
+`-Dgysf.smoke.waterNearReference=true` requests a 12-chunk near window and requires
+the far pool sample to be near-ready. The normal 4-chunk run requires that same
+sample to remain LOD-owned. `-PsmokeMaxBounces=4` selects the product-default
+bounce cap for reference comparisons; the ordinary smoke default remains 2.
+`-Dgysf.smoke.staticWaterFixture=true` freezes the fixture phase through its
+above/below-water captures, then restores animation before the full motion route.
+The water camera is (64.5,140,0.5), yaw 0, pitch 16, FOV 30 above water and
+(64.5,110,32.5), yaw 0, pitch -2, FOV 70 below water.
+`-Dgysf.smoke.waterCompareOnly=true` freezes both captures and finishes at tick
+1290 without resource reload, dimensions or motion. This separates water
+comparison from post-reload scene repopulation. The full-near reference requires
+all 129 centre-line samples to be near-ready, while the mixed run records the
+near-ready count and requires its far sample to remain LOD-owned.
+
+`scripts/Test-WaterOrigins.ps1` executes the production Slang origin function
+through the host backend, checking 2080 displaced/rest-plane cases and a
+total-internal-reflection self-hit negative control. It is separate from the
+Java/shader/ABI/JAR checks and the Vulkan scene tests.

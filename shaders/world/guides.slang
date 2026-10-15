@@ -28,6 +28,7 @@ public struct SpecSurface {
     public float3 normal;         // FP32: reflection reprojection amplifies normal quantization at distance
     public float3 previousNormal; // the same normal one frame ago; equal to `normal` unless the surface animates
     public float3 biasNormal;     // geometric normal, used only to offset a ray origin off the surface
+    public float3 planePos;       // rebased, undeformed BLAS surface used to keep water probes off the mesh
     public float3 motionPrev;     // current-minus-previous displacement of the reflecting surface
     public float roughness;
     public float3 albedo;         // specular albedo fed to DLSS-RR for demodulation (0 = pure diffuse)
@@ -35,7 +36,7 @@ public struct SpecSurface {
 public static SpecSurface gv_spec = {};
 
 // Static surfaces reuse one normal for all three roles. Water overrides them (height-field shading
-// point, waved normal now and last frame, flat geometric normal for the bias) via the six-argument form.
+// point, waved normal now and last frame, flat geometric normal for the bias) via the explicit form.
 public SpecSurface makeSpecSurface(float3 camRel, float3 normal, float3 previousNormal,
                             float3 biasNormal, float3 motionPrev, float roughness, float3 albedo) {
     SpecSurface s;
@@ -43,6 +44,7 @@ public SpecSurface makeSpecSurface(float3 camRel, float3 normal, float3 previous
     s.normal = normal;
     s.previousNormal = previousNormal;
     s.biasNormal = biasNormal;
+    s.planePos = camRel + worldPush.camOffset;
     s.motionPrev = motionPrev;
     s.roughness = roughness;
     s.albedo = albedo;
@@ -99,18 +101,21 @@ public float2 resolveSpecularGuides(SpecSurface surface, float3 primaryDir,
     float3 surfacePos = surface.camRel + worldPush.camOffset;
     float3 n = normalize(surface.normal);
     float3 specDir = reflect(primaryDir, n);
+    WaterWaves biasSurface = flatWaterWaves(surface.planePos, 0.0, surface.biasNormal);
+    biasSurface.position = surfacePos;
+    float3 specOrigin = waterWaveContinueOrigin(biasSurface, specDir, SURF_BIAS);
 
     // Pass A stops radiance traversal at the first split, so reflection motion keeps one dedicated,
     // deterministic guide probe.
     traceGuide(CULL_SECONDARY,
-            offsetSurfaceOrigin(surfacePos, surface.biasNormal, specDir, SURF_BIAS),
+            specOrigin,
             RAY_TMIN, specDir, 10000.0,
             max(length(surface.camRel) * primaryConeSpread, RAY_CONE_MIN_WIDTH),
             max(primaryConeSpread, RAY_CONE_MIN_SPREAD));
     float3 reflectedHit;
     float3 reflectedMotionPrev;
     if (payload.hitT > 0.0) {
-        reflectedHit = surfacePos + specDir * payload.hitT;
+        reflectedHit = specOrigin + specDir * payload.hitT;
         uint reflectedMaterial = payloadMaterial();
         // Closest-hit writes motionPrev for every material. Terrain/water are zero; dynamic opaque and
         // dielectric entities carry their per-vertex/object displacement.

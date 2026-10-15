@@ -134,6 +134,7 @@ public PathSegment tracePrimary(PathSegment seg,
             gv_spec = makeSpecSurface(gv_hitCamRel, n, previousNormal, geometricNormal,
                                       isWater ? waterSurf.motionPrev : float3(payload.motionPrev),
                                       gv_rough, float3(F, F, F));
+            gv_spec.planePos = waterSurf.planePos;
             if (dot(transmittedDir, transmittedDir) > 0.0) {
                 MediumStack guideMedium = medium;
                 if (entering) {

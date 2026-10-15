@@ -21,7 +21,10 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private static final String WORLD="gysf-26.3-smoke";
     private static final boolean TEXTURE_FIXTURE=Boolean.getBoolean("gysf.smoke.textureFixture");
     private static final boolean WATER_MATRIX=Boolean.getBoolean("gysf.smoke.waterMatrix");
-    private static final boolean WATER_FIXTURE=WATER_MATRIX || Boolean.getBoolean("gysf.smoke.waterFixture");
+    private static final boolean WATER_COMPARE=Boolean.getBoolean("gysf.smoke.waterCompareOnly");
+    private static final boolean WATER_NEAR_REFERENCE=Boolean.getBoolean("gysf.smoke.waterNearReference");
+    private static final boolean STATIC_WATER=WATER_MATRIX || WATER_COMPARE || Boolean.getBoolean("gysf.smoke.staticWaterFixture");
+    private static final boolean WATER_FIXTURE=WATER_MATRIX || WATER_COMPARE || Boolean.getBoolean("gysf.smoke.waterFixture");
     private static final boolean MOTION=Boolean.getBoolean("gysf.smoke.motion");
     private static final boolean MEMORY_PRESSURE=Boolean.getBoolean("gysf.smoke.memoryPressure");
     private static final boolean VISUAL_ONLY=TEXTURE_FIXTURE && Boolean.getBoolean("gysf.smoke.visualOnly");
@@ -48,7 +51,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
         if (!opened && client.gui.screen() instanceof TitleScreen && ticks>40) {
             opened=true;
             client.options.pauseOnLostFocus=false;
-            client.options.renderDistance().set(4);
+            client.options.renderDistance().set(WATER_NEAR_REFERENCE?12:4);
             client.options.fov().set(70);
             client.getWindow().setWindowed(854,480);
             var flows=client.createWorldOpenFlows();
@@ -95,6 +98,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
             observedReducedProvider|=VoxyCompat.renderDistanceChunks()*16<VoxyCompat.requestedDistanceBlocks();
         }
         if (worldTicks==80) { client.player.connection.sendCommand("gamemode spectator"); client.player.connection.sendCommand("tp @s 0 140 0 0 20"); client.player.connection.sendCommand("time set noon"); }
+        if (worldTicks==80 && STATIC_WATER) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(0f);
         if (worldTicks==250) {
             if(WATER_FIXTURE) client.player.connection.sendCommand("forceload add 32 0 96 160");
             client.player.connection.sendCommand(WATER_FIXTURE ? "tp @s 64 116 128 180 5" : TEXTURE_FIXTURE
@@ -125,8 +129,8 @@ public final class GysfSmokeClient implements ClientModInitializer {
             System.out.println("GYSF_SMOKE: placed isolated water fixture across 16-block section boundaries");
         }
         if (worldTicks==500) {
-            client.player.connection.sendCommand(WATER_FIXTURE ? "tp @s 64 116 0 0 5" : TEXTURE_FIXTURE ? "tp @s 0 140 0 0 16" : "tp @s 0 140 0 0 20");
-            if(TEXTURE_FIXTURE && !WATER_FIXTURE) client.options.fov().set(30);
+            client.player.connection.sendCommand(WATER_FIXTURE ? "tp @s 64 140 0 0 16" : TEXTURE_FIXTURE ? "tp @s 0 140 0 0 16" : "tp @s 0 140 0 0 20");
+            if(TEXTURE_FIXTURE || WATER_FIXTURE) client.options.fov().set(30);
         }
         if (worldTicks==890 && TEXTURE_FIXTURE) {
             System.out.println("GYSF_SMOKE: fixture near-ready="+
@@ -149,8 +153,12 @@ public final class GysfSmokeClient implements ClientModInitializer {
                 throw new IllegalStateException("Water fixture blocks were not placed across the complete test lane");
             boolean near=dev.comfyfluffy.caustica.rt.terrain.RtTerrain.isSectionReady(new net.minecraft.core.BlockPos(64,110,32));
             boolean far=dev.comfyfluffy.caustica.rt.terrain.RtTerrain.isSectionReady(new net.minecraft.core.BlockPos(64,110,128));
-            if(!near || far) throw new IllegalStateException("Water fixture did not span near and LOD terrain: "+near+"/"+far);
+            if(!near || far!=WATER_NEAR_REFERENCE) throw new IllegalStateException("Unexpected water near/LOD ownership: "+near+"/"+far+", reference="+WATER_NEAR_REFERENCE);
+            int ready=0;
+            for(int z=16;z<=144;z++) if(dev.comfyfluffy.caustica.rt.terrain.RtTerrain.isSectionReady(new net.minecraft.core.BlockPos(64,110,z))) ready++;
+            if(WATER_NEAR_REFERENCE && ready!=129) throw new IllegalStateException("Near-reference pool lane has unpublished sections: "+ready+"/129");
             System.out.println("GYSF_SMOKE: water near-ready="+near+" far-ready="+far);
+            System.out.println("GYSF_SMOKE: water lane near-ready="+ready+"/129");
         }
         if (worldTicks==900) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                 image->{try {Files.createDirectories(Path.of("screenshots"));image.writeToFile(Path.of("screenshots","gysf-joint.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
@@ -158,9 +166,10 @@ public final class GysfSmokeClient implements ClientModInitializer {
         if (VISUAL_CONTROL && worldTicks==950) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                 image->{try {image.writeToFile(Path.of("screenshots","gysf-no-textured-control.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
         if (VISUAL_CONTROL && worldTicks==980) System.clearProperty("gysf.voxy.hideTextured");
-        if (worldTicks==1000) reload=client.reloadResourcePacks();
+        if (worldTicks==1000 && !WATER_COMPARE) reload=client.reloadResourcePacks();
         if (WATER_FIXTURE && worldTicks==1100) {
             client.player.connection.sendCommand("tp @s 64 110 32 0 -2");
+            client.options.fov().set(70);
             if(WATER_MATRIX) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(0f);
         }
         if (WATER_FIXTURE && worldTicks==1250) {
@@ -168,6 +177,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
             Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                     image->{try {image.writeToFile(Path.of("screenshots","gysf-water-underwater.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
             System.out.println("GYSF_SMOKE: underwater water fixture captured");
+            System.out.println("GYSF_SMOKE: underwater resident LOD sections="+dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.residentSectionCount());
             if(WATER_MATRIX) waterCapture(client,"baseline");
         }
         if(WATER_MATRIX) {
@@ -184,6 +194,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
             if(worldTicks==1685) { CausticaConfig.Rt.Composite.DENOISER.set(true); CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(1f); }
         }
         if (WATER_FIXTURE && worldTicks==1280) client.player.connection.sendCommand("forceload remove 32 0 96 160");
+        if (STATIC_WATER && !WATER_MATRIX && worldTicks==1280) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(1f);
         if (!WATER_MATRIX && worldTicks==1350) client.player.connection.sendCommand("execute in minecraft:the_nether run tp @s 0 90 0");
         if (!WATER_MATRIX && worldTicks==1650) client.player.connection.sendCommand("execute in minecraft:overworld run tp @s 0 140 0");
         if (MOTION && worldTicks>=1750 && worldTicks<=2050 && worldTicks%10==0) {
@@ -196,8 +207,8 @@ public final class GysfSmokeClient implements ClientModInitializer {
         if (MOTION && worldTicks==2300) client.player.connection.sendCommand("tp @s 0 140 0 0 16");
         if (MOTION && worldTicks==2800) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                 image->{try {image.writeToFile(Path.of("screenshots","gysf-motion-return.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
-        if (worldTicks==(WATER_MATRIX?1720:VISUAL_ONLY?990:MOTION?2900:2200)) {
-            if(!VISUAL_ONLY) {
+        if (worldTicks==(WATER_COMPARE?1290:WATER_MATRIX?1720:VISUAL_ONLY?990:MOTION?2900:2200)) {
+            if(!VISUAL_ONLY && !WATER_COMPARE) {
                 if (reload==null || !reload.isDone()) throw new IllegalStateException("Resource reload incomplete");
                 reload.join();
                 if (!WATER_MATRIX && (!visitedNether || !returnedOverworld)) throw new IllegalStateException("Dimension round trip incomplete");

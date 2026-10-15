@@ -68,12 +68,13 @@ readiness, including empty replacements. The DH input retains its separate
 
 `-Dgysf.voxy.colourProxy=true` retains the older average-colour input for controlled
 comparisons. The textured path uses block-state material profiles, not full
-per-sprite LabPBR normal/specular maps. Distant water retains a thin glossy
-approximation for entering rays; outward crossings can exit an existing water
-medium through the near-field dielectric handler.
-gysf 0.3.1 aligns its optical biome tint with near water and makes the near-ready
-ownership probe independent of ray direction, including sloped fluid triangles.
-Transmission, absorption and waves still differ for entering far-water hits.
+per-sprite LabPBR normal/specular maps. gysf 0.4.0 routes API 5 water through the
+near-field dielectric handler in both directions, sharing optical tint,
+refraction, absorption, waves and guides. Wave-aware origins cover primary TIR
+and reflected guide probes as well as split/secondary continuations. Near-ready
+ownership is independent of ray direction, including sloped fluid triangles.
+Legacy colour proxies retain a glossy entry approximation. Provider fluid-height
+quantization and coarse geometry still limit geometric near/far continuity.
 
 The external provider starts with a 1024-block selection cap; the smoke run uses
 512 blocks. `-Dvoxy.external.maxDistanceBlocks=<512..10000>` selects a development
