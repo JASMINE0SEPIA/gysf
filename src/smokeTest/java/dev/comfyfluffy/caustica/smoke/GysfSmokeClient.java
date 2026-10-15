@@ -104,12 +104,12 @@ public final class GysfSmokeClient implements ClientModInitializer {
         }
         if (worldTicks==80) { client.player.connection.sendCommand("gamemode spectator"); client.player.connection.sendCommand("tp @s 0 140 0 0 20"); client.player.connection.sendCommand("time set noon"); }
         if (worldTicks==80 && STATIC_WATER) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(0f);
-        if(worldTicks==80 && System.getProperty("gysf.smoke.waveStrength")!=null) {
-            float strength=Float.parseFloat(System.getProperty("gysf.smoke.waveStrength"));
+        if(worldTicks==80 && (System.getProperty("gysf.smoke.waveStrength")!=null || System.getProperty("gysf.smoke.waveSpeed")!=null)) {
+            float strength=Float.parseFloat(System.getProperty("gysf.smoke.waveStrength","1.0"));
             if(!Float.isFinite(strength) || strength<0 || strength>4) throw new IllegalStateException("Invalid smoke wave strength");
             CausticaConfig.Rt.Composite.WATER_WAVES.set(true);
             CausticaConfig.Rt.Composite.WATER_WAVE_STRENGTH.set(strength);
-            if(!STATIC_WATER) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(1f);
+            if(!STATIC_WATER) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(requestedWaveSpeed());
             System.out.println("GYSF_SMOKE: water waves strength="+strength+" speed="+CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.value());
         }
         if (worldTicks==250) {
@@ -234,11 +234,11 @@ public final class GysfSmokeClient implements ClientModInitializer {
             if(worldTicks==1595) waterCapture(client,"raw-eight");
             if(worldTicks==1600) CausticaConfig.Rt.Composite.MAX_BOUNCES.set(2);
             if(worldTicks==1680) waterCapture(client,"raw-two");
-            if(worldTicks==1685) { CausticaConfig.Rt.Composite.DENOISER.set(true); CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(1f); }
+            if(worldTicks==1685) { CausticaConfig.Rt.Composite.DENOISER.set(true); CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(requestedWaveSpeed()); }
         }
         if (WATER_FIXTURE && worldTicks==(FLUID_TOPOLOGY_EDITS?1540:1280)) client.player.connection.sendCommand("forceload remove 32 0 96 160");
         if(FLUID_TOPOLOGY && worldTicks==(FLUID_TOPOLOGY_EDITS?1540:1280)) client.getSingleplayerServer().submit(()->client.getSingleplayerServer().tickRateManager().setFrozen(false));
-        if (STATIC_WATER && !WATER_MATRIX && worldTicks==1280) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(1f);
+        if (STATIC_WATER && !WATER_MATRIX && worldTicks==1280) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(requestedWaveSpeed());
         if (!WATER_MATRIX && !WATER_COMPARE && worldTicks==1350) client.player.connection.sendCommand("execute in minecraft:the_nether run tp @s 0 90 0");
         if (!WATER_MATRIX && !WATER_COMPARE && worldTicks==1650) client.player.connection.sendCommand("execute in minecraft:overworld run tp @s 0 140 0");
         if (MOTION && worldTicks>=1750 && worldTicks<=2050 && worldTicks%10==0) {
@@ -261,6 +261,10 @@ public final class GysfSmokeClient implements ClientModInitializer {
             if(System.getProperty("gysf.smoke.waveStrength")!=null && (!CausticaConfig.Rt.Composite.WATER_WAVES.value()
                     || CausticaConfig.Rt.Composite.WATER_WAVE_STRENGTH.value()!=Float.parseFloat(System.getProperty("gysf.smoke.waveStrength"))))
                 throw new IllegalStateException("Requested smoke wave strength was not retained");
+            if(System.getProperty("gysf.smoke.waveSpeed")!=null && !WATER_COMPARE
+                    && (!CausticaConfig.Rt.Composite.WATER_WAVES.value()
+                    || CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.value()!=requestedWaveSpeed()))
+                throw new IllegalStateException("Requested smoke wave speed was not retained");
             if (Boolean.getBoolean("gysf.smoke.vooxxy") && (!VoxyCompat.enabled() || maxMeshes==0 || maxRtSections==0)) throw new IllegalStateException("External ray-traced LOD geometry missing");
             long textured=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.texturedBuildCount();
             long leafCutouts=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.leafCutoutQuadCount();
@@ -297,6 +301,12 @@ public final class GysfSmokeClient implements ClientModInitializer {
             finished=true;
             client.disconnectWithSavingScreen();
         }
+    }
+
+    private static float requestedWaveSpeed() {
+        float speed=Float.parseFloat(System.getProperty("gysf.smoke.waveSpeed","1.0"));
+        if(!Float.isFinite(speed) || speed<0 || speed>4) throw new IllegalStateException("Invalid smoke wave speed");
+        return speed;
     }
 
     private void waterCapture(Minecraft client,String name) {

@@ -133,20 +133,21 @@ public float waterWaveHeight(float2 p, float t, float footprint) {
     return height;
 }
 
-// Evaluate the current gradient/height and linearly rewind them to the previous phase in one spectrum
-// walk. Frame deltas are bounded on the CPU, so this avoids a second set of trigonometric/exponential
-// work while remaining accurate over the sub-frame interval used by reflection reprojection.
+// Reflection reprojection needs the actual previous field. A first-order rewind can overshoot the
+// entire wave-height envelope at high speed / long frame intervals, even within the CPU's 0.25 s
+// history window. Evaluate both phases; frozen / zero-height waves share the current result.
 public void waterWaveFieldTemporal(float2 p, float currentT, float previousT, float footprint,
                            out float height, out float2 grad,
                            out float previousHeight, out float2 previousGrad) {
     float heightDt;
     float2 gradDt;
-    waterWaveSpectrum<1>(p, currentT, footprint, height, grad, heightDt, gradDt);
-    // Scaled-time rewind: the spectrum above evaluates at t' = t * WAVE_SPEED * speedScale, and the
-    // derivatives are w.r.t. that same scaled time, so the frame delta converts with both factors.
-    float dt = (currentT - previousT) * WAVE_SPEED * waterWaveSpeedScale();
-    previousGrad = grad - dt * gradDt;
-    previousHeight = height - dt * heightDt;
+    waterWaveSpectrum<0>(p, currentT, footprint, height, grad, heightDt, gradDt);
+    if (currentT == previousT || waterWaveSpeedScale() == 0.0 || waterWaveStrengthScale() == 0.0) {
+        previousHeight = height;
+        previousGrad = grad;
+    } else {
+        waterWaveSpectrum<0>(p, previousT, footprint, previousHeight, previousGrad, heightDt, gradDt);
+    }
 }
 
 public void waterWaveGradTemporal(float2 p, float currentT, float previousT, float footprint,
