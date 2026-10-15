@@ -40,7 +40,11 @@ public final class DistantHorizonsCompat {
      * one byte[] and one List node for every source VBO.
      */
     public record LodMesh(long key, long version, int originX, int originY, int originZ, int width,
-                          int dataPointWidth, byte[] opaque, byte[] transparent) {
+                          int dataPointWidth, byte[] opaque, byte[] transparent, VoxySceneData.Mesh textured) {
+        public LodMesh(long key,long version,int originX,int originY,int originZ,int width,
+                       int dataPointWidth,byte[] opaque,byte[] transparent) {
+            this(key,version,originX,originY,originZ,width,dataPointWidth,opaque,transparent,null);
+        }
     }
 
     /** DH quality values relevant to RT LOD selection. */

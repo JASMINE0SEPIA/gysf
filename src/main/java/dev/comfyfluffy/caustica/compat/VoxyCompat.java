@@ -12,7 +12,7 @@ import java.util.List;
  * Optional reflection bridge to the Caustica edition of Voxy.
  *
  * <p>No Voxy class appears in Caustica's constant pool, so Caustica still starts normally when Voxy is
- * absent or a different Voxy build is installed. The provider publishes immutable 64-byte LOD quads;
+ * absent or a different Voxy build is installed. API 5 scenes retain packed quads, models and tint;
  * all Vulkan buffers, BLASes, TLAS instances, shading and lifetime management remain inside Caustica.</p>
  */
 public final class VoxyCompat {
@@ -24,6 +24,7 @@ public final class VoxyCompat {
     private static volatile int renderDistanceChunks;
     private static volatile boolean warned;
     private static final Object FALLBACK_HOST_LOCK = new Object();
+    private static int boundAtlasSlot;
 
     private VoxyCompat() {
     }
@@ -54,6 +55,20 @@ public final class VoxyCompat {
 
     public static boolean enabled() {
         return API != null;
+    }
+
+    /** Borrow the provider-owned atlas only after the current pipeline's descriptor registry exists. */
+    public static int bindAtlas() {
+        long view=API != null && API.textured != null ? API.textured.atlasView() : 0;
+        boundAtlasSlot=view==0 ? 0 : dev.comfyfluffy.caustica.rt.entity.RtEntityTextures.INSTANCE
+                .slotForBorrowedView(API.textured.atlasOwner(),view);
+        if(view!=0 && boundAtlasSlot==0) throw new IllegalStateException("No bindless slot for the vooxxy atlas");
+        return boundAtlasSlot;
+    }
+    public static int boundAtlasSlot() { return boundAtlasSlot; }
+    public static int texturedMeshCount() {
+        int count=0; for(var mesh:snapshot) if(mesh.textured()!=null) count++;
+        return count;
     }
 
     /** Whether the installed provider is currently enabled in Voxy's persistent config. */
@@ -127,6 +142,8 @@ public final class VoxyCompat {
         if (api == null) return;
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null || minecraft.gameRenderer == null) {
+            if(api.textured!=null) api.textured.clear();
+            boundAtlasSlot=0;
             if (!snapshot.isEmpty()) {
                 snapshot = List.of();
                 revision++;
@@ -138,6 +155,12 @@ public final class VoxyCompat {
         try {
             var camera = minecraft.gameRenderer.mainCamera().position();
             int vanillaChunks = minecraft.options.renderDistance().get();
+            if(api.textured!=null && !Boolean.getBoolean("gysf.voxy.colourProxy")) {
+                var next=api.textured.poll(camera.x,camera.y,camera.z);
+                renderDistanceChunks=((Number)api.renderDistanceChunks.invoke(null)).intValue();
+                if(next!=snapshot) { snapshot=next; revision++; }
+                return;
+            }
             Object value = api.poll.invoke(null, camera.x, camera.y, camera.z, vanillaChunks,
                     minecraft.level.getMinY(), minecraft.level.getMaxY());
             long sourceRevision = ((Number) api.revision.invoke(null)).longValue();
@@ -200,6 +223,8 @@ public final class VoxyCompat {
     }
 
     private static void clearLocalSnapshot() {
+        if(API!=null && API.textured!=null) API.textured.clear();
+        boundAtlasSlot=0;
         snapshot = List.of();
         revision++;
         observedSourceRevision = Long.MIN_VALUE;
@@ -217,6 +242,7 @@ public final class VoxyCompat {
     }
 
     private static final class Api {
+        final VoxySceneReader textured;
         final Method poll;
         final Method revision;
         final Method renderDistanceChunks;
@@ -231,6 +257,10 @@ public final class VoxyCompat {
         private volatile Access meshAccess;
 
         private Api(Class<?> bridge) throws ReflectiveOperationException {
+            VoxySceneReader reader;
+            try { reader=new VoxySceneReader(bridge); }
+            catch(NoSuchMethodException missing) { reader=null; }
+            textured=reader;
             poll = bridge.getMethod("poll", double.class, double.class, double.class,
                     int.class, int.class, int.class);
             revision = bridge.getMethod("revision");

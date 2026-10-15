@@ -18,6 +18,7 @@ import java.nio.file.*;
 /** Automatic Vulkan scene check in an isolated development world. */
 public final class GysfSmokeClient implements ClientModInitializer {
     private static final String WORLD="gysf-26.3-smoke";
+    private static final boolean TEXTURE_FIXTURE=Boolean.getBoolean("gysf.smoke.textureFixture");
     private int ticks,worldTicks,maxMeshes,maxRtSections;
     private boolean opened;
     private boolean finished;
@@ -49,7 +50,20 @@ public final class GysfSmokeClient implements ClientModInitializer {
         maxMeshes=Math.max(maxMeshes,VoxyCompat.meshes().size());
         maxRtSections=Math.max(maxRtSections,dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.residentSectionCount());
         if (worldTicks==80) { client.player.connection.sendCommand("gamemode spectator"); client.player.connection.sendCommand("tp @s 0 140 0 0 20"); client.player.connection.sendCommand("time set noon"); }
-        if (worldTicks==250) client.player.connection.sendCommand("tp @s 128 140 0 90 20");
+        if (worldTicks==250) client.player.connection.sendCommand(TEXTURE_FIXTURE
+                ? "tp @s 0 140 128 180 20" : "tp @s 128 140 0 90 20");
+        if (worldTicks==300 && TEXTURE_FIXTURE) {
+            String[] commands={
+                    "fill -24 109 94 24 118 108 minecraft:air",
+                    "fill -24 108 88 24 108 120 minecraft:stone_bricks",
+                    "fill -22 109 100 -15 116 100 minecraft:oak_leaves[persistent=true,distance=1]",
+                    "fill -11 109 100 -4 116 100 minecraft:oak_planks",
+                    "fill 0 109 100 7 116 100 minecraft:bricks",
+                    "fill 11 109 100 18 116 100 minecraft:glass",
+                    "fill -22 109 112 18 109 116 minecraft:stone_slab[type=bottom]"};
+            for(String command:commands) client.player.connection.sendCommand(command);
+            System.out.println("GYSF_SMOKE: placed isolated textured LOD fixture at z=100");
+        }
         if (worldTicks==500) client.player.connection.sendCommand("tp @s 0 140 0 0 20");
         if (worldTicks==900) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                 image->{try {Files.createDirectories(Path.of("screenshots"));image.writeToFile(Path.of("screenshots","gysf-joint.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
@@ -62,7 +76,11 @@ public final class GysfSmokeClient implements ClientModInitializer {
             if (!visitedNether || !returnedOverworld) throw new IllegalStateException("Dimension round trip incomplete");
             if (!RtComposite.enabled() || RtComposite.frameCounter()<100) throw new IllegalStateException("RT frames missing");
             if (Boolean.getBoolean("gysf.smoke.vooxxy") && (!VoxyCompat.enabled() || maxMeshes==0 || maxRtSections==0)) throw new IllegalStateException("External ray-traced LOD geometry missing");
-            System.out.println("GYSF_SMOKE: PASS frames="+RtComposite.frameCounter()+" maxVoxyMeshes="+maxMeshes+" maxRtLodSections="+maxRtSections);
+            long textured=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.texturedBuildCount();
+            if (Boolean.getBoolean("gysf.smoke.vooxxy") && !Boolean.getBoolean("gysf.voxy.colourProxy")
+                    && (textured==0 || VoxyCompat.texturedMeshCount()==0 || VoxyCompat.boundAtlasSlot()==0))
+                throw new IllegalStateException("Textured Voxy geometry or atlas binding missing");
+            System.out.println("GYSF_SMOKE: PASS frames="+RtComposite.frameCounter()+" maxVoxyMeshes="+maxMeshes+" maxRtLodSections="+maxRtSections+" texturedBatches="+textured+" atlasSlot="+VoxyCompat.boundAtlasSlot());
             finished=true;
             client.disconnectWithSavingScreen();
         }

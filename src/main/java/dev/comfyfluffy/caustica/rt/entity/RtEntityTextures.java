@@ -203,6 +203,9 @@ public final class RtEntityTextures {
         return slots.shared(view);
     }
 
+    /** Register an image owned by another renderer; this registry never destroys borrowed views. */
+    public int slotForBorrowedView(Object owner,long view) { return slots.perOwner(owner,view); }
+
     /** Write any newly-registered entity textures into the pipeline's bindless set (before the trace). */
     public void uploadPending(RtPipeline pipeline, long sampler) {
         for (RtBindlessSlotTable.Write w : slots.drainPending()) {

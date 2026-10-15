@@ -56,16 +56,21 @@ The joint runtime does not install Sodium or read a PCL instance.
 
 ## Current integration boundary
 
-vooxxy exposes immutable API 5 meshes and model metadata. gysf currently consumes
-the colour-proxy adapter through `CausticaBridge`: average albedo, biome tint,
-whole-block geometry, water/glass/emissive classification and source revisions.
-This uses gysf's existing RT LOD acceleration-structure and near-terrain readiness
-path. It is an experimental integration, not complete LabPBR parity.
+gysf consumes immutable API 5 packed quads and model metadata through an optional
+reflection boundary. Worker-owned snapshots retain float face geometry, UV
+repetition, per-face atlas identity, conditional biome tint and fluid corner
+heights. Ray and shadow traversal sample the provider's borrowed RGBA atlas,
+including cutout coverage. Both use the existing RT LOD acceleration structures
+and near-terrain readiness mask. See [TEXTURED-LOD.md](TEXTURED-LOD.md).
+
+`-Dgysf.voxy.colourProxy=true` retains the older average-colour input for controlled
+comparisons. The textured path uses block-state material profiles, not full
+per-sprite LabPBR normal/specular maps. Distant water remains a thin glossy
+surface, rather than entering the path tracer's near-field water volume stack.
 
 The external provider starts with a 1024-block selection cap; the smoke run uses
 512 blocks. `-Dvoxy.external.maxDistanceBlocks=<512..10000>` selects a development
-limit without changing the user's stored Voxy distance. The complete textured
-API consumer, cutout alpha, sub-block/fluid corner fidelity, LOD emitter sampling,
+limit without changing the user's stored Voxy distance. Per-sprite PBR, LOD emitter sampling,
 reflection detail selection and a total-residency VRAM budget remain required
 before production qualification. Geometry beyond visited/imported terrain cannot
 be synthesized from the LOD cache.
@@ -79,8 +84,9 @@ GPU rendering and visual validation.
 
 1. Keep the current 26.3 Vulkan provider/RT prototype reproducible, including
    resource reload, dimension changes and optional-Sodium startup.
-2. Replace the colour-proxy adapter with direct API 5 textured quads. Preserve
-   cutout alpha, model UVs, slab/stair/fluid shapes, material IDs and biome tint.
+2. Validate the textured API 5 path across resource packs and material classes.
+   Match sprite PBR and accepted near/far coverage; preserve Voxy's existing
+   shape approximation rather than promising detailed vanilla stair geometry.
 3. Share near-terrain readiness and LOD coverage across primary, shadow and
    reflection rays; add distant emitters and PBR material lookup.
 4. Budget atlas, mesh and acceleration-structure residency together; measure

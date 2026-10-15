@@ -171,6 +171,8 @@ public struct WorldPush {
     // emitter scatter terms can never tint differently. Trailing lane after fogParams — the
     // generated WorldPushData appends it; RtFogShaderRegressionTest pins the pairing.
     public float4   fogTint;
+    // Current descriptor slot for the provider-owned LOD atlas; zero disables textured LOD hits.
+    public uint     voxyTextureSlot;
 };
 
 // worldPush.dimension: the sky/lighting model this frame renders with. The Overworld runs the full
@@ -406,6 +408,10 @@ public struct TerrainPrim {
     public uint aux0;
     public uint aux1;
 };
+
+// Textured LOD records: flags low bits carry face:3, tint mode:2 and alpha-cutout:1.
+// aux0 is the baked model id; aux1 is the LOD level; normal.w is uniform emission.
+public static const uint PRIM_VOXY = 0x80000000u;
 
 // Compiled material record (80 B). Source-format data has already been decoded into canonical pages;
 // texturePage indexes the dedicated canonical page arrays. materialUv maps sprite-local UV into the packed

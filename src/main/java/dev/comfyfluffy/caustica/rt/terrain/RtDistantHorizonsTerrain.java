@@ -270,6 +270,8 @@ public final class RtDistantHorizonsTerrain {
         return current == null ? 0 : current.entries.size();
     }
 
+    public long texturedBuildCount() { return RtVoxyMesh.PACKED_BATCHES.get(); }
+
     public long emissiveRevision() {
         Proxy proxy = current;
         return proxy == null ? 0L : proxy.revision;
@@ -309,7 +311,8 @@ public final class RtDistantHorizonsTerrain {
         ArrayList<DistantHorizonsCompat.LodMesh> snapshot =
                 new ArrayList<>(DistantHorizonsCompat.lodMeshesSnapshot());
         if (snapshot.isEmpty()) return List.of();
-        snapshot = removeFullyCoveredCoarseMeshes(snapshot);
+        // API 5 already selects non-overlapping 3D branches; DH's X/Z-only filter would erase vertical layers.
+        if(snapshot.stream().noneMatch(mesh -> mesh.textured()!=null)) snapshot = removeFullyCoveredCoarseMeshes(snapshot);
         int qualityBandBlocks = switch (Math.clamp(quality.horizontalQualityRank(), 0, 4)) {
             case 0 -> 128;
             case 1 -> 192;
@@ -356,8 +359,15 @@ public final class RtDistantHorizonsTerrain {
             }
 
             ArrayList<DhSlice> slices = new ArrayList<>();
-            appendDhSlices(mesh, mesh.opaque(), false, slices);
-            appendDhSlices(mesh, mesh.transparent(), true, slices);
+            if(mesh.textured()!=null) {
+                for(int start=0;start<mesh.textured().quadCount();start+=MAX_BUILD_QUADS) {
+                    int end=Math.min(mesh.textured().quadCount(),start+MAX_BUILD_QUADS);
+                    slices.add(new DhSlice(mesh,new byte[0],false,start,end,new QuadCounts(end-start,0,0,0)));
+                }
+            } else {
+                appendDhSlices(mesh, mesh.opaque(), false, slices);
+                appendDhSlices(mesh, mesh.transparent(), true, slices);
+            }
             rebuiltBatches += appendPlannedBuilds(plan, mesh, slices);
         }
         CausticaMod.LOGGER.info(
@@ -521,6 +531,10 @@ public final class RtDistantHorizonsTerrain {
 
     private static PackedSection packDhBatch(List<DhSlice> batch, int originX, int originZ,
                                              RtMaterialRegistry.Snapshot materials) {
+        if(!batch.isEmpty() && batch.getFirst().mesh.textured()!=null) {
+            return RtVoxyMesh.pack(batch.stream().map(slice -> new RtVoxyMesh.Slice(slice.mesh,slice.start,slice.end)).toList(),
+                    originX,originZ,materials);
+        }
         int solidQuads = 0;
         int emissiveQuads = 0;
         int glassQuads = 0;

@@ -9,6 +9,7 @@
 import world_common;
 import math;
 import portals;
+import voxy;
 
 [[vk::push_constant]] WorldPushConstants pc;
 
@@ -506,26 +507,35 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
     uint rayCone = payload.rayCone;
 
     // Native DH/Voxy LOD triangles participate in camera, GI, reflection and shadow rays through the
-    // same TLAS. They carry no sprite: shading comes from vertex colour + the mini-material class.
+    // same TLAS. API 5 faces sample the provider's baked atlas; DH retains its vertex-colour path.
     if ((InstanceID() & DH_INSTANCE_KIND) == DH_INSTANCE_KIND) {
         Section sec = ConstPtr<Section>(pc.dhTableAddr)[InstanceID() & IDX_MASK];
         uint dpid = PrimitiveIndex() + sec.triBase[GeometryIndex()];
         TerrainPrim dpr = ConstPtr<TerrainPrim>(sec.primAddr)[dpid];
+        bool textured = (dpr.flags & PRIM_VOXY) != 0u;
+        float4 voxySample = float4(1.0);
+        float3 dhColour = dpr.tint.rgb;
+        if (textured) {
+            uint slot = ConstPtr<WorldPush>(pc.worldPushAddr)[0].voxyTextureSlot;
+            voxySample = voxyTexel(dpr, voxyUv(sec, dpid, float3(1.0-attribs.x-attribs.y, attribs)),
+                    rayCone, RayTCurrent(), entityAlbedoTex[NonUniformResourceIndex(slot)]);
+            dhColour = voxyColour(dpr, voxySample);
+        }
         float3 sourceNormal = normalize(dpr.normal.xyz);
         float3 dn = sourceNormal;
         if (dot(dn, -WorldRayDirection()) < 0.0) dn = -dn;
         uint dhSurface = uint(dpr.tint.w + 0.5);
-        uint dhMaterial = dpr.flags;
+        uint dhMaterial = textured ? ((dpr.flags & 64u) != 0u ? 1u : 0u) : dpr.flags;
         bool dhWater = dhSurface == DH_SURFACE_WATER;
         bool dhGlass = dhSurface == DH_SURFACE_GLASS;
         bool dhEmissive = dhSurface == DH_SURFACE_EMISSIVE;
         bool dhEmissiveGlass = dhSurface == DH_SURFACE_EMISSIVE_GLASS;
-        float dhEmission = (dhEmissive || dhEmissiveGlass) ? clamp(asfloat(dpr.aux0), 0.0, 4.0) : 0.0;
+        float dhEmission = textured ? dpr.normal.w : (dhEmissive || dhEmissiveGlass) ? clamp(asfloat(dpr.aux0), 0.0, 4.0) : 0.0;
         MaterialHeader dhHeader = ConstPtr<MaterialHeader>(pc.materialTableAddr)[dpr.materialId];
 
         if (dhGlass || dhEmissiveGlass) {
-            float opticalAlpha = clamp(asfloat(dhEmissiveGlass ? dpr.aux1 : dpr.aux0), 0.04, 0.80);
-            float3 glassTint = glassTransmissionFilter(dpr.tint.rgb, opticalAlpha);
+            float opticalAlpha = textured ? voxyGlassAlpha(voxySample.a) : clamp(asfloat(dhEmissiveGlass ? dpr.aux1 : dpr.aux0), 0.04, 0.80);
+            float3 glassTint = glassTransmissionFilter(dhColour, opticalAlpha);
             float ior = max(dhHeader.params.z, 1.45);
             float f0Base = (ior - 1.0) / (ior + 1.0);
             float f0Scalar = f0Base * f0Base;
@@ -550,7 +560,7 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
             // Our unified dielectric raygen derives the medium from the payload, so the safe adaptation
             // is a glossy opaque water-tinted surface: correct colour and a plausible sun highlight at
             // horizon distances, with zero medium-stack interaction.
-            payload.albedo = half3(dpr.tint.rgb);
+            payload.albedo = half3(dhColour);
             payload.normal = half3(dn);
             payload.hitT = RayTCurrent();
             payload.motionPrev = half3(0.0h, 0.0h, 0.0h);
@@ -560,14 +570,14 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
             return;
         }
 
-        payload.albedo = half3(dpr.tint.rgb);
+        payload.albedo = half3(dhColour);
         payload.normal = half3(dn);
         payload.hitT = RayTCurrent();
         payload.motionPrev = half3(0.0h, 0.0h, 0.0h);
         float dhRoughness = dhMaterialRoughness(dhMaterial, dhHeader.params.x);
         float dhMetalness = dhMaterialMetalness(dhMaterial, dhHeader.params.y);
         float dhSss = dhMaterialSss(dhMaterial);
-        payload.f0 = half3(lerp(float3(0.04, 0.04, 0.04), dpr.tint.rgb, dhMetalness));
+        payload.f0 = half3(lerp(float3(0.04, 0.04, 0.04), dhColour, dhMetalness));
         payloadSetPacked(payload, MATERIAL_OPAQUE, dhRoughness, dhMetalness, dhEmission, dhSss,
                 max(dhHeader.params.z, 1.0), 0.0,
                 dhEmissive ? EMISSION_SOURCE_UNIFORM : EMISSION_SOURCE_NONE);

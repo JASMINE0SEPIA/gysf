@@ -13,6 +13,7 @@
 // crossing; radiance cutout paths do not touch either field.
 import world_common;
 import math;
+import voxy;
 
 [[vk::push_constant]] WorldPushConstants pc;
 
@@ -97,16 +98,29 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
         TerrainPrim pr = ConstPtr<TerrainPrim>(sec.primAddr)[tri];
         bool shadowRay = (RayFlags() & RAY_FLAG_SKIP_CLOSEST_HIT_SHADER) != 0u;
         uint dhSurface = uint(pr.tint.w + 0.5);
+        bool textured = (pr.flags & PRIM_VOXY) != 0u;
+        float4 voxySample = float4(1.0);
+        float3 dhColour = pr.tint.rgb;
+        if (textured) {
+            uint slot = ConstPtr<WorldPush>(pc.worldPushAddr)[0].voxyTextureSlot;
+            voxySample = voxyTexel(pr, voxyUv(sec, tri, bary), payload.rayCone, RayTCurrent(),
+                    entityAlbedoTex[NonUniformResourceIndex(slot)]);
+            if (voxySample.a < (((pr.flags & 32u) != 0u) ? ALPHA_CUTOFF : 0.01)) {
+                IgnoreHit();
+                return;
+            }
+            dhColour = voxyColour(pr, voxySample);
+        }
         if (dhSurface == DH_SURFACE_WATER && shadowRay) {
-            payload.albedo *= half3(lerp(float3(1.0, 1.0, 1.0), pr.tint.rgb, WATER_SHADOW_TINT));
+            payload.albedo *= half3(lerp(float3(1.0, 1.0, 1.0), dhColour, WATER_SHADOW_TINT));
             payload.hitT = payload.hitT < 0.0 ? RayTCurrent() : min(payload.hitT, RayTCurrent());
             IgnoreHit();
             return;
         }
         if ((dhSurface == DH_SURFACE_GLASS || dhSurface == DH_SURFACE_EMISSIVE_GLASS) && shadowRay) {
-            float opticalAlpha = clamp(asfloat(dhSurface == DH_SURFACE_EMISSIVE_GLASS
+            float opticalAlpha = textured ? voxyGlassAlpha(voxySample.a) : clamp(asfloat(dhSurface == DH_SURFACE_EMISSIVE_GLASS
                     ? pr.aux1 : pr.aux0), 0.04, 0.80);
-            payload.albedo *= half3(glassTransmissionFilter(pr.tint.rgb, opticalAlpha) * 0.94);
+            payload.albedo *= half3(glassTransmissionFilter(dhColour, opticalAlpha) * 0.94);
             IgnoreHit();
             return;
         }
