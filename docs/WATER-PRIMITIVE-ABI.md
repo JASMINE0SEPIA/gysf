@@ -1,0 +1,97 @@
+# Water primitive packet: development 0.7.0
+
+`RtWaterGeometry` is the shared CPU encoder intended for near terrain and
+external LOD water. `water_primitive.slang` decodes its exact packet and calls
+the finite-water solver now shared from `shaders/world/water_patch.slang`.
+The game pipeline does **not** select these primitives yet. The installed
+0.6.2/Vulkan.8 pair retains its previous behavior and hashes.
+
+## Packet and geometry rules
+
+Each primitive is five std430 float4 lanes (80 bytes):
+
+| Byte offset | Values | Meaning |
+| --- | --- | --- |
+| 0 | v0.xyz, freeTop | Triangle vertex 0; freeTop is 0 or 1 |
+| 16 | v1.xyz, shape | Triangle vertex 1; projected domain 0..3 |
+| 32 | v2.xyz, reserved | Triangle vertex 2; reserved is zero |
+| 48 | minX, minZ, width, depth | Bounds of the original full quad |
+| 64 | w00, w01, w10, w11 | Shared shoreline envelope in [0,1] |
+
+The shape codes are 0: u>=v, 1: u<=v, 2: u+v<=1, 3: u+v>=1. Both diagonals
+are supported. Rest normals derive separately from each triangle's winding,
+so a nonplanar quad preserves its actual two planes. Flat side/bottom faces
+use a two-sided triangle intersection; disabling animation also retains the
+exact rest triangles. A flat, dry top remains a finite triangle rather than
+an infinite plane.
+
+The separate AS build input is one Vulkan AABB per triangle: six floats
+(minXYZ, maxXYZ), 24 bytes. Only upward-facing free-top triangles grow by the
+2.2-block maximum displacement. Padding uses `nextDown`/`nextUp` as well as
+an epsilon, so it survives FP32 spacing at large local coordinates. Vertices
+and rectangles remain section-local; shader callers provide a translation
+into the same rebased world space used by the transported wave domains.
+General affine/negative-scale instance transforms are outside this packet's
+current contract.
+
+The encoder takes the existing indexed water-bucket range, including a
+nonzero triangle base. It rejects incomplete pairs, invalid indices,
+degenerate triangles, nonfinite positions, invalid envelopes and nonrectangular
+free-top projections before native allocation. The nullable envelope argument
+currently means fully wet. It does not supply the missing world-space shoreline
+policy and must not be treated as a finished near/far transition.
+
+## Verification and current limit
+
+The complete Gradle check passes 174 Java tests, including seven new encoder
+tests. These cover indexed order, bucket offsets, either diagonal, separate
+nonplanar planes, static faces, malformed inputs and FP32-safe padding. An
+analytic sum of the production spectrum's maximum positive amplitudes at the
+actual maximum shader slider verifies that 2.2 blocks encloses the wave field.
+
+`WaterGpuGeometry` exports eight triangles with the production encoder. The
+native RT harness now uploads those 80-byte records and builds its AABBs from
+the encoder's 24-byte bounds, replacing its hard-coded geometry reconstruction.
+The CPU dense-reference probe can load the identical exported packet with
+`Test-WaterPatch.ps1 -Geometry <primitives.txt>`.
+
+| CPU reference mode on the exported packet | Hits / misses | Failures / exhausted | Max distance error |
+| --- | ---: | ---: | ---: |
+| Selected triangle | 1346 / 2750 | 0 / 0 | 0.0000214577 blocks |
+| All eight triangles | 1426 / 2670 | 0 / 0 | 0.0000345707 blocks |
+
+All 21 independent clipping checks pass, including four additional alternate-
+diagonal checks. Ten flat-primitive checks pass for top/bottom directions,
+finite bounds, parallel rays, side faces, dry envelopes and animation-off
+behavior. Gradient, envelope, curvature and continuity properties also pass.
+
+The updated native RT executable compiles and all five SPIR-V modules pass
+Vulkan 1.2 validation. After the user exited Minecraft, the packet-backed GPU
+runs completed on the RTX 5060 Laptop/616.92 with 262144 rays per dispatch.
+Both coherent/shuffled layouts have zero hit/miss/distance failures in the
+4096 distinct readbacks, and zero Vulkan synchronization validation errors.
+Selected-triangle medians are 0.319008/0.363984 ms (maximum distance error
+0.00002218 blocks); all-eight-triangle medians are 0.396672/0.561792 ms
+(maximum error 0.0000372 blocks). These are synthetic traversal measurements,
+not Minecraft frame times. The previous measurements in WATER-PATCH-INTEGRATION.md
+remain separate records of the older, hard-coded geometry harness.
+
+```powershell
+# While Minecraft is running: compiler, encoder export and CPU checks only.
+.\scripts\Test-WaterGpu.ps1 -Trace -CompileOnly -OutputDir artifacts/packet-compile
+.\scripts\Test-WaterPatch.ps1 -Geometry artifacts/packet-compile/primitives.txt -RayTable artifacts/packet-rays.csv
+.\scripts\Test-WaterPatch.ps1 -Scene -Geometry artifacts/packet-compile/primitives.txt -RayTable artifacts/scene-rays.csv
+
+# After Minecraft exits, use fresh directories for actual GPU measurements.
+.\scripts\Test-WaterGpu.ps1 -Trace -RayCount 262144 -OutputDir artifacts/packet-trace
+.\scripts\Test-WaterGpu.ps1 -Trace -Scene -RayCount 262144 -OutputDir artifacts/packet-scene
+python scripts/Analyze-WaterGpu.py artifacts/packet-rays.csv artifacts/packet-trace --finite-patch
+python scripts/Analyze-WaterGpu.py artifacts/scene-rays.csv artifacts/packet-scene --finite-patch
+```
+
+Remaining integration follows WATER-PATCH-INTEGRATION.md: shared shoreline
+data, actual terrain/LOD upload and retirement, mixed triangle/AABB geometry,
+SBT routing and intersection-stage visibility, optical payload/continuations,
+guides and camera-medium handling. Production selection remains disabled until
+these paths and the game fixtures are verified. Development builds use the
+separate 0.7.0 version; they are not the installed playable 0.6.2 artifact.

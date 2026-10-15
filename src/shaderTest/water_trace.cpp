@@ -52,11 +52,11 @@ struct TraceRunner:Runner {
 #undef RT_PROC
         VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};props.pNext=&rt;rt.pNext=&as;vkGetPhysicalDeviceProperties2(physical,&props);
         if(count>rt.maxRayDispatchInvocationCount||rt.maxRayRecursionDepth<1||rt.maxRayHitAttributeSize<8)throw std::runtime_error("Unsupported ray dispatch/attribute limits");
+        std::array<VkAabbPositionsKHR,8> boxes{};std::ifstream bounds(directory/"bounds.txt");
+        for(auto& box:boxes)for(auto ptr:{&box.minX,&box.minY,&box.minZ,&box.maxX,&box.maxY,&box.maxZ})if(!(bounds>>*ptr))throw std::runtime_error("Incomplete production water AABBs");
         std::array<VkAccelerationStructureInstanceKHR,8> instances{};
         for(uint32_t i=0;i<8;i++) {
-            uint32_t sample=i/2;float x=float(int(sample)*3-6),z=float(int(sample)*5-9);
-            // Rest planes span [111.8,112.4]; 4x wave strength has <2.2 blocks of displacement.
-            VkAabbPositionsKHR box{x,111,z,x+1,115,z+1};
+            auto& box=boxes[i];
             upload(bottoms[i].input,&box,sizeof(box),VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
             VkAccelerationStructureGeometryKHR geometry{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};geometry.geometryType=VK_GEOMETRY_TYPE_AABBS_KHR;geometry.flags=VK_GEOMETRY_OPAQUE_BIT_KHR;
             auto& aabb=geometry.geometry.aabbs;aabb.sType=VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;aabb.data.deviceAddress=address(bottoms[i].input);aabb.stride=sizeof(box);

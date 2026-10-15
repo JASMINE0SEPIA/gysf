@@ -1,11 +1,15 @@
 [CmdletBinding()]
-param([string]$SlangcPath,[string]$OutputDir,[int]$RayCount=65536,[switch]$FinitePatch,[switch]$Trace,[switch]$Scene)
+param([string]$SlangcPath,[string]$OutputDir,[int]$RayCount=65536,[switch]$FinitePatch,[switch]$Trace,[switch]$Scene,[switch]$CompileOnly)
 $ErrorActionPreference='Stop'
 $taskRoot=Split-Path -Parent $PSScriptRoot
 Push-Location $taskRoot
 try {
     if(-not $env:VULKAN_SDK) { throw 'Set VULKAN_SDK to the installed Vulkan SDK' }
     if($Scene -and -not $Trace) { throw '-Scene requires -Trace' }
+    if(-not $CompileOnly) {
+        $taskGames=@(Get-CimInstance Win32_Process -Filter "Name = 'java.exe' OR Name = 'javaw.exe'" | Where-Object { $_.CommandLine -match '(KnotClient|net.minecraft.client.main.Main|--gameDir)' })
+        if($taskGames.Count) { throw 'Minecraft is running; use -CompileOnly or run the GPU measurement after it exits' }
+    }
     if(-not $SlangcPath) { $SlangcPath=Join-Path $taskRoot '.tools/slang-2026.18/bin/slangc.exe' }
     if(-not $OutputDir) { $OutputDir=Join-Path $taskRoot ('artifacts/'+(Get-Date -Format 'yyyy-MM-dd')+'/water-gpu/run-'+[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) }
     $taskBuild=Join-Path $taskRoot 'build/shader-test'
@@ -34,15 +38,24 @@ try {
     }
     $taskJdk=if($env:JAVA_HOME){$env:JAVA_HOME}else{'C:/Program Files/Java/jdk-25'}
     New-Item -ItemType Directory -Force (Join-Path $taskBuild 'classes') | Out-Null
-    & (Join-Path $taskJdk 'bin/javac.exe') -d (Join-Path $taskBuild 'classes') src/main/java/dev/comfyfluffy/caustica/rt/RtWaterWaveDomain.java src/shaderTest/WaterGpuDomain.java
+    & (Join-Path $taskJdk 'bin/javac.exe') -d (Join-Path $taskBuild 'classes') src/main/java/dev/comfyfluffy/caustica/rt/RtWaterWaveDomain.java src/shaderTest/WaterGpuDomain.java src/main/java/dev/comfyfluffy/caustica/rt/terrain/RtWaterGeometry.java src/shaderTest/WaterGpuGeometry.java
     if($LASTEXITCODE -ne 0) { throw 'CPU domain exporter compilation failed' }
     & (Join-Path $taskJdk 'bin/java.exe') -cp (Join-Path $taskBuild 'classes') dev.comfyfluffy.caustica.rt.WaterGpuDomain (Join-Path $OutputDir 'domain.txt')
     if($LASTEXITCODE -ne 0) { throw 'CPU domain export failed' }
+    if($Trace) {
+        & (Join-Path $taskJdk 'bin/java.exe') -cp (Join-Path $taskBuild 'classes') dev.comfyfluffy.caustica.rt.terrain.WaterGpuGeometry (Join-Path $OutputDir 'primitives.txt') (Join-Path $OutputDir 'bounds.txt')
+        if($LASTEXITCODE -ne 0) { throw 'Production water geometry export failed' }
+    }
     & cmake -S src/shaderTest -B $taskBuild -A x64
     if($LASTEXITCODE -ne 0) { throw 'GPU-test CMake configure failed' }
     $taskTarget=if($Trace){'water_trace'}else{'water_gpu'}
     & cmake --build $taskBuild --config Release --target $taskTarget
     if($LASTEXITCODE -ne 0) { throw 'GPU-test native build failed' }
+    if($CompileOnly) {
+        [ordered]@{State='compiled-not-run';Trace=[bool]$Trace;Scene=[bool]$Scene;RayCount=$RayCount} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $OutputDir 'compiled-only.json') -Encoding utf8
+        Write-Output "WATER_GPU_COMPILED_ONLY=$OutputDir"
+        return
+    }
     if($Trace) {
         if($Scene) {
             & (Join-Path $taskBuild 'Release/water_trace.exe') (Join-Path $OutputDir 'domain.txt') $OutputDir $RayCount scene

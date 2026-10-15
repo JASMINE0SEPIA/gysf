@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$SlangcPath,[string]$RayTable,[switch]$Scene)
+param([string]$SlangcPath,[string]$RayTable,[switch]$Scene,[string]$Geometry)
 $ErrorActionPreference='Stop'
 $taskRoot=Split-Path -Parent $PSScriptRoot
 Push-Location $taskRoot
@@ -18,7 +18,9 @@ try {
     if($LASTEXITCODE -ne 0) { throw 'Finite-patch CMake configure failed' }
     & cmake --build $taskBuild --config Release --target water_patch
     if($LASTEXITCODE -ne 0) { throw 'Finite-patch host build failed' }
-    if($RayTable) { & (Join-Path $taskBuild 'Release/water_patch.exe') $RayTable }
-    else { & (Join-Path $taskBuild 'Release/water_patch.exe') }
+    $taskArgs=@()
+    if($RayTable) { $taskArgs+=@('--ray-table',$RayTable) }
+    if($Geometry) { $taskArgs+=@('--geometry',(Resolve-Path -LiteralPath $Geometry).Path) }
+    & (Join-Path $taskBuild 'Release/water_patch.exe') @taskArgs
     if($LASTEXITCODE -ne 0) { throw 'Finite-patch correctness gate failed' }
 } finally { Pop-Location }

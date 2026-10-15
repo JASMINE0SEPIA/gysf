@@ -1,15 +1,15 @@
 import water;
 import world_core;
 
-// Procedural-patch candidate. A triangle's rest plane is affine; the original quad's four shoreline
-// weights are shared by both halves. Kept outside the runtime until AS/payload integration is tested.
+// Finite-water intersection module. A triangle's rest plane is affine; the original quad's four shore
+// weights are shared by both halves. Not yet selected by the game pipeline; native probes use this module.
 public struct WaterPatch {
     public float3 point;
     public float3 normal;
     public float2 minimum;
     public float2 extent;
     public float4 shore; // (x0z0,x0z1,x1z0,x1z1), each in [0,1]
-    public uint half;    // 0: u>=v, 1: u<=v
+    public uint half;    // 0: u>=v, 1: u<=v, 2: u+v<=1, 3: u+v>=1
 };
 
 public void patchWeight(WaterPatch patch,float2 p,out float weight,out float2 gradient) {
@@ -65,8 +65,10 @@ public bool patchInterval(WaterPatch patch,float3 ro,float3 rd,float lower,float
     float2 uv=(ro.xz-patch.minimum)/patch.extent,d=rd.xz/patch.extent;
     if(!clipPatchLinear(uv.x,d.x,lo,hi)||!clipPatchLinear(1.0-uv.x,-d.x,lo,hi)
         ||!clipPatchLinear(uv.y,d.y,lo,hi)||!clipPatchLinear(1.0-uv.y,-d.y,lo,hi))return false;
-    float sign=patch.half==0?1.0:-1.0;
-    if(!clipPatchLinear(sign*(uv.x-uv.y),sign*(d.x-d.y),lo,hi))return false;
+    float sign=patch.half==0||patch.half==3?1.0:-1.0;
+    float diagonal=patch.half<2?uv.x-uv.y:uv.x+uv.y-1.0;
+    float diagonalRate=patch.half<2?d.x-d.y:d.x+d.y;
+    if(!clipPatchLinear(sign*diagonal,sign*diagonalRate,lo,hi))return false;
     float offset=dot(patch.normal,ro-patch.point)/patch.normal.y,rate=dot(patch.normal,rd)/patch.normal.y;
     if(upper==0.0 && rate==0.0)return false; // no isolated crossing for a coplanar flat ray
     return clipPatchLinear(offset-lower,rate,lo,hi)&&clipPatchLinear(upper-offset,-rate,lo,hi);

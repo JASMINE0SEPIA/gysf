@@ -1,10 +1,51 @@
 import water;
 import water_patch;
 import water_patch_cases;
+import water_primitive;
 import water_test_frame;
 import world_core;
 RWStructuredBuffer<uint> result;
 RWStructuredBuffer<float4> rayResults;
+RWStructuredBuffer<float4> packedPrimitives;
+
+WaterPatch probeGeometry(uint sample,uint half) {
+    uint count,stride;packedPrimitives.GetDimensions(count,stride);
+    if(count==40) {
+        uint base=(sample*2u+half)*5u;
+        WaterPrimitive primitive;
+        primitive.v0=packedPrimitives[base];primitive.v1=packedPrimitives[base+1];primitive.v2=packedPrimitives[base+2];
+        primitive.rectangle=packedPrimitives[base+3];primitive.shore=packedPrimitives[base+4];
+        return primitiveWaterPatch(primitive,float3(0));
+    }
+    return waterPatchGeometry(sample,half);
+}
+
+bool primitiveMatches(WaterPrimitive primitive,float3 ro,float3 rd,bool animated,float lo,float hi,
+        float expected,float2 expectedBary) {
+    float2 bary;uint work;bool exhausted;
+    float t=intersectWaterPrimitive(primitive,float3(0),ro,rd,.37,0,animated,lo,hi,bary,work,exhausted);
+    return !exhausted && (expected<0?t<0:abs(t-expected)<1e-5&&length(bary-expectedBary)<1e-5);
+}
+
+uint flatPrimitiveChecks(out uint count) {
+    WaterPrimitive p;p.v0=float4(0,0,0,0);p.v1=float4(0,0,1,1);p.v2=float4(1,0,1,0);
+    p.rectangle=float4(0,0,1,1);p.shore=float4(1);
+    uint failures=0;count=0;float2 bary=float2(.5,.25);
+    count++;if(!primitiveMatches(p,float3(.25,2,.75),float3(0,-1,0),true,0,100,2,bary))failures++;
+    count++;if(!primitiveMatches(p,float3(.25,-2,.75),float3(0,1,0),true,0,100,2,bary))failures++;
+    count++;if(!primitiveMatches(p,float3(.75,2,.25),float3(0,-1,0),true,0,100,-1,0))failures++;
+    count++;if(!primitiveMatches(p,float3(.25,2,.75),float3(0,-1,0),true,2.1,100,-1,0))failures++;
+    count++;if(!primitiveMatches(p,float3(.25,2,.75),float3(0,-1,0),true,0,1.9,-1,0))failures++;
+    count++;if(!primitiveMatches(p,float3(.25,2,.75),float3(1,0,0),true,0,100,-1,0))failures++;
+    p.v0.w=1;
+    count++;if(!primitiveMatches(p,float3(.25,2,.75),float3(0,-1,0),false,0,100,2,bary))failures++;
+    p.shore=0;
+    count++;if(!primitiveMatches(p,float3(.25,2,.75),float3(0,-1,0),true,0,100,2,bary))failures++;
+    p.v0.w=0;p.v1=float4(0,0,1,0);p.v2=float4(0,1,1,0);
+    count++;if(!primitiveMatches(p,float3(2,.25,.75),float3(-1,0,0),true,0,100,2,bary))failures++;
+    count++;if(!primitiveMatches(p,float3(-2,.25,.75),float3(1,0,0),true,0,100,2,bary))failures++;
+    return failures;
+}
 
 bool intervalMatches(WaterPatch patch,float3 ro,float3 rd,float lower,float upper,
         float rayMin,float rayMax,bool expected,float expectedLo,float expectedHi) {
@@ -24,6 +65,12 @@ uint analyticClipChecks(out uint count) {
     count++;if(!intervalMatches(p,float3(.5,.5,-1),float3(0,0,1),0,1,0,100,true,1,1.75))failures++;
     p.half=1;
     count++;if(!intervalMatches(p,float3(.5,.5,-1),float3(0,0,1),0,1,0,100,true,1.75,4))failures++;
+    p.half=2;
+    count++;if(!intervalMatches(p,float3(-1,.5,.75),float3(1,0,0),0,1,0,100,true,1,2.5))failures++;
+    count++;if(!intervalMatches(p,float3(.5,.5,-1),float3(0,0,1),0,1,0,100,true,1,3.25))failures++;
+    p.half=3;
+    count++;if(!intervalMatches(p,float3(-1,.5,.75),float3(1,0,0),0,1,0,100,true,2.5,3))failures++;
+    count++;if(!intervalMatches(p,float3(.5,.5,-1),float3(0,0,1),0,1,0,100,true,3.25,4))failures++;
     p.half=0;
     count++;if(!intervalMatches(p,float3(-1,2,.75),float3(1,0,0),0,1,0,100,false,0,0))failures++;
     count++;if(!intervalMatches(p,float3(.5,2,.3),float3(0,-1,0),.2,.8,0,100,true,1.2,1.8))failures++;
@@ -77,9 +124,10 @@ void patchProbe(uint3 id:SV_DispatchThreadID) {
     for(uint c=0;c<4096;c++) {
         WaterPatch patch;float3 ro,rd;float time,footprint;
         waterPatchCase(c,patch,ro,rd,time,footprint);
+        patch=probeGeometry((c>>3)&3u,(c>>5)&1u);
         uint work=0;bool exhausted=false,uncertain=false;float t=-1,b=-1;WaterPatch selectedPatch=patch;
         for(uint candidate=0;candidate<(GYSF_PATCH_SCENE?8u:1u);candidate++) {
-            WaterPatch shape=GYSF_PATCH_SCENE?waterPatchGeometry(candidate/2u,candidate&1u):patch;
+            WaterPatch shape=GYSF_PATCH_SCENE?probeGeometry(candidate/2u,candidate&1u):patch;
             uint steps;bool usedUp;
             float hit=intersectWaterPatch(shape,ro,rd,time,footprint,0.0001,100.0,steps,usedUp);
             work+=steps;exhausted=exhausted||usedUp;
@@ -130,7 +178,7 @@ void patchProbe(uint3 id:SV_DispatchThreadID) {
         if(abs(ha-hb)>1e-6||length(ga-gb)>1e-6)properties++;
         patchField(a,float2(0,p.y),0.37,0,ha,ga);
         if(abs(ha)>1e-6||length(ga)>1e-6)properties++;
-        a=waterPatchGeometry(2,0);b=waterPatchGeometry(2,1);
+        a=probeGeometry(2,0);b=probeGeometry(2,1);
         p=a.minimum+float2(float(i)/16.0);
         float ya=a.point.y-dot(a.normal.xz,p-a.point.xz)/a.normal.y;
         float yb=b.point.y-dot(b.normal.xz,p-b.point.xz)/b.normal.y;
@@ -141,4 +189,5 @@ void patchProbe(uint3 id:SV_DispatchThreadID) {
     uint clipCount;result[11]=analyticClipChecks(clipCount);result[12]=clipCount;
     result[13]=gradientFailures;result[14]=asuint(maxGradientError);result[15]=boundsFailures;
     result[16]=curvatureFailures;result[17]=asuint(maxCurvatureFraction);
+    uint flatCount;result[18]=flatPrimitiveChecks(flatCount);result[19]=flatCount;
 }

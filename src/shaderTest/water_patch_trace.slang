@@ -1,12 +1,14 @@
 import water;
 import water_patch;
 import water_patch_cases;
+import water_primitive;
 import world_core;
 import world_common;
 
 [[vk::binding(100,0)]] RWStructuredBuffer<float4> output;
 [[vk::binding(101,0)]] StructuredBuffer<WaterWaveDomain> domains;
 [[vk::binding(102,0)]] RaytracingAccelerationStructure patchScene;
+[[vk::binding(103,0)]] StructuredBuffer<WaterPrimitive> primitives;
 struct ProbePush { uint count; uint shuffled; uint reserved0; uint reserved1; };
 [[vk::push_constant]] ConstantBuffer<ProbePush> settings;
 struct PatchPayload { float4 result; };
@@ -35,13 +37,15 @@ void patchRaygen() {
 void patchIntersection() {
     uint c=patchCaseIndex();WaterPatch patch;float3 unusedRo,unusedRd;float time,footprint;
     waterPatchCase(c,patch,unusedRo,unusedRd,time,footprint);
-    patch=waterPatchGeometry(InstanceID()/2u,InstanceID()&1u);
+    WaterPrimitive primitive=primitives[InstanceID()];
+    patch=primitiveWaterPatch(primitive,float3(0));
     worldPush.waterAnchor=float4(0);
     for(int i=0;i<WAVE_COUNT;i++)worldPush.waterWaveDomains[i]=domains[i];
     float3 ro=ObjectRayOrigin(),rd=ObjectRayDirection();
     float t=-1;uint work=0;bool exhausted=false;
 #if GYSF_GPU_CANDIDATE
-    t=intersectWaterPatch(patch,ro,rd,time,footprint,RayTMin(),RayTCurrent(),work,exhausted);
+    float2 bary;
+    t=intersectWaterPrimitive(primitive,float3(0),ro,rd,time,footprint,true,RayTMin(),RayTCurrent(),bary,work,exhausted);
 #else
     float rate=dot(patch.normal,rd);
     if(rate!=0) {

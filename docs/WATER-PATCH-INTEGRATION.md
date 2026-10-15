@@ -151,3 +151,9 @@ The PCL deployment is a separate, explicitly requested action: the known
 instance. The prior Voxy/Sodium/Sulkan JARs were backed up, 14 unrelated mods
 and 47 existing profile/config files were hash-verified unchanged, and no save
 was opened. These new prototypes have not been installed there.
+
+The subsequent [0.7.0 packet foundation](WATER-PRIMITIVE-ABI.md) moves the
+finite solver into a shared shader module and introduces an actual CPU encoder
+and decoder for near/LOD water. Its packet-backed GPU upload path subsequently
+passes selected-triangle and whole-scene reference checks with clean Vulkan
+validation. Keep those measurements separate from the older harness above.

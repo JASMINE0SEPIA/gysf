@@ -27,7 +27,7 @@ struct Runner {
     VkPhysicalDeviceMemoryProperties memoryProperties{};uint32_t family{},timestampBits{};
     VkCommandPool commandPool{};VkCommandBuffer command{};VkFence fence{};VkQueryPool queries{};
     VkDescriptorSetLayout setLayout{};VkDescriptorPool descriptorPool{};VkDescriptorSet descriptor{};VkPipelineLayout layout{};
-    std::array<VkPipeline,2> pipelines{};Buffer output,domains,staging;std::atomic_uint errors{};
+    std::array<VkPipeline,2> pipelines{};Buffer output,domains,primitives,staging;std::atomic_uint errors{};
     bool tracing{};VkPipelineStageFlags shaderStages=VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
     ~Runner(){close();}
     static VKAPI_ATTR VkBool32 VKAPI_CALL debug(VkDebugUtilsMessageSeverityFlagBitsEXT severity,VkDebugUtilsMessageTypeFlagsEXT,
@@ -93,6 +93,7 @@ struct Runner {
         check(vkCreateDevice(physical,&deviceInfo,nullptr,&device),"create device");vkGetDeviceQueue(device,family,0,&queue);
         createBuffer(output,VkDeviceSize(count)*sizeof(Result),VK_BUFFER_USAGE_STORAGE_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_SRC_BIT,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         createBuffer(domains,7*8*sizeof(float),VK_BUFFER_USAGE_STORAGE_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if(trace)createBuffer(primitives,8*20*sizeof(float),VK_BUFFER_USAGE_STORAGE_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         createBuffer(staging,output.bytes,VK_BUFFER_USAGE_TRANSFER_SRC_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
         check(vkMapMemory(device,staging.memory,0,VK_WHOLE_SIZE,0,&staging.mapped),"map staging");
         std::ifstream input(domainFile);std::array<float,56> data{};for(auto& value:data) if(!(input>>value)) throw std::runtime_error("Incomplete production domain table");
@@ -106,21 +107,29 @@ struct Runner {
         check(vkCreateQueryPool(device,&queryInfo,nullptr,&queries),"create queries");
         begin();VkBufferCopy copy{0,0,domains.bytes};vkCmdCopyBuffer(command,staging.handle,domains.handle,1,&copy);
         barrier(domains,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,shaderStages);submit();
-        std::array<VkDescriptorSetLayoutBinding,3> bindings{};
+        if(trace) {
+            std::ifstream geometry(std::filesystem::path(domainFile).parent_path()/"primitives.txt");std::array<float,160> packet{};
+            for(auto& value:packet)if(!(geometry>>value))throw std::runtime_error("Incomplete production water packet");
+            std::memcpy(staging.mapped,packet.data(),sizeof(packet));flush(false);
+            begin();VkBufferCopy primitiveCopy{0,0,primitives.bytes};vkCmdCopyBuffer(command,staging.handle,primitives.handle,1,&primitiveCopy);
+            barrier(primitives,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,shaderStages);submit();
+        }
+        std::array<VkDescriptorSetLayoutBinding,4> bindings{};
         auto stages=trace?VK_SHADER_STAGE_RAYGEN_BIT_KHR|VK_SHADER_STAGE_INTERSECTION_BIT_KHR:VK_SHADER_STAGE_COMPUTE_BIT;
         for(int i=0;i<2;i++){bindings[i].binding=100+i;bindings[i].descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;bindings[i].descriptorCount=1;bindings[i].stageFlags=stages;}
         bindings[2]={102,VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,1,VK_SHADER_STAGE_RAYGEN_BIT_KHR,nullptr};
-        VkDescriptorSetLayoutCreateInfo setInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};setInfo.bindingCount=trace?3:2;setInfo.pBindings=bindings.data();
+        bindings[3]={103,VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,1,VK_SHADER_STAGE_INTERSECTION_BIT_KHR|VK_SHADER_STAGE_RAYGEN_BIT_KHR,nullptr};
+        VkDescriptorSetLayoutCreateInfo setInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};setInfo.bindingCount=trace?4:2;setInfo.pBindings=bindings.data();
         check(vkCreateDescriptorSetLayout(device,&setInfo,nullptr,&setLayout),"create descriptor layout");
-        std::array<VkDescriptorPoolSize,2> poolSizes={VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,2},VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,1}};
+        std::array<VkDescriptorPoolSize,2> poolSizes={VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,trace?3u:2u},VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,1}};
         VkDescriptorPoolCreateInfo descriptorInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};descriptorInfo.maxSets=1;descriptorInfo.poolSizeCount=trace?2:1;descriptorInfo.pPoolSizes=poolSizes.data();
         check(vkCreateDescriptorPool(device,&descriptorInfo,nullptr,&descriptorPool),"create descriptor pool");
         VkDescriptorSetAllocateInfo setAllocate{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};setAllocate.descriptorPool=descriptorPool;setAllocate.descriptorSetCount=1;setAllocate.pSetLayouts=&setLayout;
         check(vkAllocateDescriptorSets(device,&setAllocate,&descriptor),"allocate descriptor");
-        std::array<VkDescriptorBufferInfo,2> infos={VkDescriptorBufferInfo{output.handle,0,output.bytes},VkDescriptorBufferInfo{domains.handle,0,domains.bytes}};
-        std::array<VkWriteDescriptorSet,2> writes{};
-        for(int i=0;i<2;i++){writes[i].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;writes[i].dstSet=descriptor;writes[i].dstBinding=100+i;writes[i].descriptorCount=1;writes[i].descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;writes[i].pBufferInfo=&infos[i];}
-        vkUpdateDescriptorSets(device,2,writes.data(),0,nullptr);
+        std::array<VkDescriptorBufferInfo,3> infos={VkDescriptorBufferInfo{output.handle,0,output.bytes},VkDescriptorBufferInfo{domains.handle,0,domains.bytes},VkDescriptorBufferInfo{primitives.handle,0,primitives.bytes}};
+        std::array<VkWriteDescriptorSet,3> writes{};
+        for(int i=0;i<(trace?3:2);i++){writes[i].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;writes[i].dstSet=descriptor;writes[i].dstBinding=i==2?103:100+i;writes[i].descriptorCount=1;writes[i].descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;writes[i].pBufferInfo=&infos[i];}
+        vkUpdateDescriptorSets(device,trace?3:2,writes.data(),0,nullptr);
         VkPushConstantRange range{VkShaderStageFlags(stages),0,sizeof(Push)};
         VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};layoutInfo.setLayoutCount=1;layoutInfo.pSetLayouts=&setLayout;layoutInfo.pushConstantRangeCount=1;layoutInfo.pPushConstantRanges=&range;
         check(vkCreatePipelineLayout(device,&layoutInfo,nullptr,&layout),"create pipeline layout");
@@ -189,7 +198,7 @@ struct Runner {
         if(device){vkDeviceWaitIdle(device);for(auto p:pipelines)if(p)vkDestroyPipeline(device,p,nullptr);pipelines={};
             if(layout)vkDestroyPipelineLayout(device,layout,nullptr);if(descriptorPool)vkDestroyDescriptorPool(device,descriptorPool,nullptr);if(setLayout)vkDestroyDescriptorSetLayout(device,setLayout,nullptr);
             if(queries)vkDestroyQueryPool(device,queries,nullptr);if(commandPool)vkDestroyCommandPool(device,commandPool,nullptr);if(fence)vkDestroyFence(device,fence,nullptr);
-            for(Buffer* b:{&output,&domains,&staging}){if(b->mapped)vkUnmapMemory(device,b->memory);if(b->handle)vkDestroyBuffer(device,b->handle,nullptr);if(b->memory)vkFreeMemory(device,b->memory,nullptr);*b={};}
+            for(Buffer* b:{&output,&domains,&primitives,&staging}){if(b->mapped)vkUnmapMemory(device,b->memory);if(b->handle)vkDestroyBuffer(device,b->handle,nullptr);if(b->memory)vkFreeMemory(device,b->memory,nullptr);*b={};}
             vkDestroyDevice(device,nullptr);device={};}
         if(messenger){auto destroy=(PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance,"vkDestroyDebugUtilsMessengerEXT");destroy(instance,messenger,nullptr);messenger={};}
         if(instance){vkDestroyInstance(instance,nullptr);instance={};}
