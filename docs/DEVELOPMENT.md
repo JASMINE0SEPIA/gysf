@@ -1,0 +1,91 @@
+# gysf and vooxxy
+
+gysf is a Minecraft 26.3 Fabric Vulkan path-tracing fork of Caustica. vooxxy
+provides persistent distant-terrain data, model baking and hierarchical mesh
+selection. gysf owns the ray-traced scene and the final world image.
+
+## Source baseline
+
+- Caustica: `ComfyFluffy/Caustica`; project-owned code is LGPL-3.0-or-later.
+- Minecraft 26.3 adaptation: `xysgottaken2/Caustica`, `port-26.3`,
+  `96ef701e2b1e5283ea28a2ce158f5c0ffefd8a57`, with its complete history retained.
+- External LOD provider reference: `skayla2007/voxy`,
+  `0b61b96d1e4a495522ece3c1428e7e78b162c0d2`, API 5.
+- Paired consumer reference: `skayla2007/Caustica`,
+  `e83674e4d1c4ca02b6321de23cebaf7bb1cc90b6`.
+- NVIDIA SDK: DLSS `v310.7.0`, source commit
+  `a291cc7d2cc642a51566f3dfd5376f635cd1b284`; vendor licensing stays separate.
+
+Original source packages, texture namespaces and the `caustica.toml` settings
+namespace remain compatible. The Fabric mod identity and artifact name are
+`gysf`; install one Caustica-derived renderer JAR at a time. The README stays
+one sentence. Original development documentation is in CAUSTICA-26.3-BASE.md.
+
+## Build
+
+Use JDK 25, Gradle Wrapper 9.7.0 and Slang 2026.18. A Vulkan SDK supplies
+`glslangValidator` and `spirv-val`. A separate Slang binary can be selected with
+`-PslangcPath=<path>`; its version must support explicit std430 device pointers.
+The local compiler ZIP SHA-256 is
+`6ffa4827b519fd0a85b38407049d87ab0c1f045fe2289cb1e6831f965169f8a1`.
+
+```powershell
+$env:JAVA_HOME = 'C:\Program Files\Java\jdk-25'
+# Set VULKAN_SDK and DLSS_SDK to your own installations.
+.\scripts\Build-26.3.ps1 -Native -SlangcPath 'C:\your\Slang-2026.18\bin\slangc.exe'
+```
+
+NGX is built from source using CMake/MSVC and the official NVIDIA SDK. Vendor
+DLLs and downloaded SDKs stay outside Git. Without optional vendor inputs,
+the corresponding DLSS/FSR/NRD/XeSS options are unavailable. See the original
+THIRD_PARTY_NOTICES.md for their separate terms.
+
+## Joint development run
+
+Build the sibling `../voxy-vulkan-26.3` repository first, then run:
+
+```powershell
+.\scripts\Build-26.3.ps1 -Joint -ValidateVulkan
+```
+
+The development-only `gysf_smoke` mod creates or reopens its own fixed-seed
+world under `run-smoke/`, moves the camera, records a screenshot, reloads
+resources, visits the Nether and returns, verifies RT frames and resident LOD acceleration structures, and
+saves/disconnects before stopping. It is never included in the production JAR.
+The joint runtime does not install Sodium or read a PCL instance.
+
+## Current integration boundary
+
+vooxxy exposes immutable API 5 meshes and model metadata. gysf currently consumes
+the colour-proxy adapter through `CausticaBridge`: average albedo, biome tint,
+whole-block geometry, water/glass/emissive classification and source revisions.
+This uses gysf's existing RT LOD acceleration-structure and near-terrain readiness
+path. It is an experimental integration, not complete LabPBR parity.
+
+The external provider starts with a 1024-block selection cap; the smoke run uses
+512 blocks. `-Dvoxy.external.maxDistanceBlocks=<512..10000>` selects a development
+limit without changing the user's stored Voxy distance. The complete textured
+API consumer, cutout alpha, sub-block/fluid corner fidelity, LOD emitter sampling,
+reflection detail selection and a total-residency VRAM budget remain required
+before production qualification. Geometry beyond visited/imported terrain cannot
+be synthesized from the LOD cache.
+
+Progressive coverage, shader guides, shared Vulkan host synchronization,
+resource reload, dimension change, clean shutdown and motion performance are
+acceptance requirements. Automated CPU/ABI/SPIR-V checks are distinct from
+GPU rendering and visual validation.
+
+## Development order
+
+1. Keep the current 26.3 Vulkan provider/RT prototype reproducible, including
+   resource reload, dimension changes and optional-Sodium startup.
+2. Replace the colour-proxy adapter with direct API 5 textured quads. Preserve
+   cutout alpha, model UVs, slab/stair/fluid shapes, material IDs and biome tint.
+3. Share near-terrain readiness and LOD coverage across primary, shadow and
+   reflection rays; add distant emitters and PBR material lookup.
+4. Budget atlas, mesh and acceleration-structure residency together; measure
+   camera-motion frame times and memory pressure before increasing distance.
+
+The paired provider is [vooxxy](https://github.com/JASMINE0SEPIA/vooxxy), branch
+`jasmine/26.3-vulkan`. Local GPU evidence and its limits are recorded in
+[VALIDATION-2026-10-15.md](VALIDATION-2026-10-15.md).

@@ -21,6 +21,7 @@ public final class CausticaClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
+		dev.comfyfluffy.caustica.compat.VoxyCompat.initialize();
 		CausticaMod.LOGGER.info("Caustica client initialized");
 
 		// The classic deck's shape is authored data (textures/environment/clouds.png — see
@@ -56,6 +57,8 @@ public final class CausticaClient implements ClientModInitializer {
 			if (rtInitDone) {
 				RtContext ctx = RtContext.currentOrNull();
 				if (ctx != null) {
+					// Provider uploads may submit Minecraft work; finish them before reserving an RT frame.
+					dev.comfyfluffy.caustica.compat.DistantHorizonsCompat.tickOptionalSources();
 					RtFrameStats.FRAME.beginIfInactive();
 					// Bring the world pipeline + LabPBR atlases up before terrain tessellates, so per-prim
 					// material flags resolve from the first section (PBR on join, no re-extract). No-op

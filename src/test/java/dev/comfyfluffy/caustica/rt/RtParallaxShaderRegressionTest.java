@@ -30,7 +30,7 @@ final class RtParallaxShaderRegressionTest {
 
     @Test
     void heightFieldIsWalkedAsAColumnGridNotAsDepthLayers() throws IOException {
-        String trace = slice(Files.readString(WORLD_RCHIT), "ParallaxHit parallaxTrace(", "\n}\n");
+        String trace = slice(Files.readString(WORLD_RCHIT).replace("\r\n", "\n"), "ParallaxHit parallaxTrace(", "\n}\n");
 
         assertFalse(trace.contains("layerDepth"), "the layer march must not come back: layers have no sides");
         assertFalse(trace.contains("layerCount"), "the walk is bounded by texel crossings, not by layers");
@@ -51,7 +51,7 @@ final class RtParallaxShaderRegressionTest {
 
     @Test
     void columnHeightsAreTexelExactAndStayInsideTheSprite() throws IOException {
-        String source = Files.readString(WORLD_RCHIT);
+        String source = Files.readString(WORLD_RCHIT).replace("\r\n", "\n");
         String sampler = slice(source, "float parallaxColumnHeight(", "\n}\n");
 
         // Columns ARE texels: a bilinear tap between two of them rounds the boxes back into a smear.
@@ -66,7 +66,7 @@ final class RtParallaxShaderRegressionTest {
 
     @Test
     void blockSpritesTileWhileEntityAtlasesStopAtTheirIsland() throws IOException {
-        String source = Files.readString(WORLD_RCHIT);
+        String source = Files.readString(WORLD_RCHIT).replace("\r\n", "\n");
 
         assertTrue(source.contains("terrainParallax = parallaxTrace(materialHeader, uv, blockLod, n, tp0, tp1, tp2,\n"
                         + "                uv0, uv1, uv2, vdir, true);"),
@@ -84,7 +84,7 @@ final class RtParallaxShaderRegressionTest {
 
     @Test
     void sideWallsReplaceTheMappedNormalOnBothHitPaths() throws IOException {
-        String source = Files.readString(WORLD_RCHIT);
+        String source = Files.readString(WORLD_RCHIT).replace("\r\n", "\n");
 
         assertTrue(source.contains("n = entityParallax.wall ? entityParallax.normal : surface.normal;"),
                 "an entity wall hit must shade with the wall, not with the face's normal map");
@@ -104,7 +104,7 @@ final class RtParallaxShaderRegressionTest {
         int max = slangInt("PARALLAX_MAX_CROSSINGS");
         assertTrue(min > 0 && min < max, "crossing bounds must be a usable range: " + min + ".." + max);
 
-        String params = slice(Files.readString(COMPOSITE), "private static Float4 parallaxParams()", "\n    }\n");
+        String params = slice(Files.readString(COMPOSITE).replace("\r\n", "\n"), "private static Float4 parallaxParams()", "\n    }\n");
         Matcher matcher = Pattern
                 .compile("Math\\.min\\((\\d+)\\.0f,\\s*Math\\.max\\((\\d+)\\.0f")
                 .matcher(params);
@@ -120,11 +120,11 @@ final class RtParallaxShaderRegressionTest {
 
     @Test
     void reliefDepthStillCollapsesWhenPomIsDisabled() throws IOException {
-        String params = slice(Files.readString(COMPOSITE), "private static Float4 parallaxParams()", "\n    }\n");
+        String params = slice(Files.readString(COMPOSITE).replace("\r\n", "\n"), "private static Float4 parallaxParams()", "\n    }\n");
         assertTrue(params.contains("float depth = enabled ? strength * 0.125f : 0.0f;"),
                 "a disabled POM must push a zero relief depth, which the shader treats as \"no effect\"");
 
-        String trace = slice(Files.readString(WORLD_RCHIT), "ParallaxHit parallaxTrace(", "\n}\n");
+        String trace = slice(Files.readString(WORLD_RCHIT).replace("\r\n", "\n"), "ParallaxHit parallaxTrace(", "\n}\n");
         assertInOrder(trace, "if (reliefDepth <= 1.0e-5)", "return flatHit;");
         assertTrue(trace.contains("if ((header.features & MATERIAL_FEATURE_NORMAL) == 0u)"),
                 "a material without an _n page has no height field and must keep its flat UV");
@@ -132,14 +132,14 @@ final class RtParallaxShaderRegressionTest {
 
     private static int slangInt(String name) throws IOException {
         Matcher matcher = Pattern.compile("const\\s+int\\s+" + name + "\\s*=\\s*(-?\\d+)\\s*;")
-                .matcher(Files.readString(WORLD_COMMON));
+                .matcher(Files.readString(WORLD_COMMON).replace("\r\n", "\n"));
         assertTrue(matcher.find(), "missing shader constant: " + name);
         return Integer.parseInt(matcher.group(1));
     }
 
     private static float slangFloat(String name) throws IOException {
         Matcher matcher = Pattern.compile("const\\s+float\\s+" + name + "\\s*=\\s*(-?[\\d.]+)\\s*;")
-                .matcher(Files.readString(WORLD_COMMON));
+                .matcher(Files.readString(WORLD_COMMON).replace("\r\n", "\n"));
         assertTrue(matcher.find(), "missing shader constant: " + name);
         return Float.parseFloat(matcher.group(1));
     }
@@ -163,7 +163,7 @@ final class RtParallaxShaderRegressionTest {
 
     @Test
     void everyHeightSampleIsBoundedByTheCrossingBudget() throws IOException {
-        String trace = slice(Files.readString(WORLD_RCHIT), "ParallaxHit parallaxTrace(", "\n}\n");
+        String trace = slice(Files.readString(WORLD_RCHIT).replace("\r\n", "\n"), "ParallaxHit parallaxTrace(", "\n}\n");
         assertEquals(1, count(trace, "parallaxColumnHeight("),
                 "the walk must read the height field from exactly one bounded loop");
         assertTrue(trace.contains("clamp(int(round(parallaxParams.y)), PARALLAX_MIN_CROSSINGS, PARALLAX_MAX_CROSSINGS)"),

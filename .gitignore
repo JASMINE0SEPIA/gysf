@@ -4,6 +4,9 @@
 /buildSrc/build/
 native/*/build/
 run/
+run-smoke/
+.tools/
+artifacts/
 out/
 logs/
 /logs

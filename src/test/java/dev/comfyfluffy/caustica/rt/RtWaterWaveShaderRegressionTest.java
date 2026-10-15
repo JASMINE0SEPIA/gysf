@@ -23,7 +23,7 @@ final class RtWaterWaveShaderRegressionTest {
 
     @Test
     void spectrumAccumulatesHeightNotJustGradient() throws IOException {
-        String water = Files.readString(WATER);
+        String water = Files.readString(WATER).replace("\r\n", "\n");
 
         assertFalse(water.contains("gradient-only"),
                 "the surface must no longer stay geometrically flat");
@@ -37,7 +37,7 @@ final class RtWaterWaveShaderRegressionTest {
 
     @Test
     void animatedWaterIntersectsTheHeightFieldAlongTheViewRay() throws IOException {
-        String water = Files.readString(WATER);
+        String water = Files.readString(WATER).replace("\r\n", "\n");
         String intersect = slice(water, "public WaterWaves evaluateWaterWaves(", "\n}\n");
 
         assertTrue(intersect.contains("WAVE_NEWTON_STEPS"),
@@ -52,9 +52,9 @@ final class RtWaterWaveShaderRegressionTest {
 
     @Test
     void radianceAndGuidePassesUseGeometricWavesWhenTheToggleIsOn() throws IOException {
-        String primary = Files.readString(PRIMARY);
-        String world = Files.readString(WORLD);
-        String guides = Files.readString(GUIDES);
+        String primary = Files.readString(PRIMARY).replace("\r\n", "\n");
+        String world = Files.readString(WORLD).replace("\r\n", "\n");
+        String guides = Files.readString(GUIDES).replace("\r\n", "\n");
 
         assertTrue(primary.contains("evaluateWaterWaves(") && primary.contains("waterWaveContinueOrigin("),
                 "Pass A must displace the primary water hit and continue from the height field");
@@ -68,7 +68,7 @@ final class RtWaterWaveShaderRegressionTest {
 
     @Test
     void continuationOriginsStayOffTheRestPlaneMesh() throws IOException {
-        String origin = slice(Files.readString(WATER), "public float3 waterWaveContinueOrigin(", "\n}\n");
+        String origin = slice(Files.readString(WATER).replace("\r\n", "\n"), "public float3 waterWaveContinueOrigin(", "\n}\n");
 
         assertTrue(origin.contains("goingOut > 0.0"),
                 "reflections must stay outside the rest-plane triangle");

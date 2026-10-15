@@ -139,7 +139,6 @@ public final class RtDistantHorizonsTerrain {
 
     public void frame(RtContext ctx, int rebaseX, int rebaseY, int rebaseZ) {
         Minecraft minecraft = Minecraft.getInstance();
-        DistantHorizonsCompat.tickOptionalSources();
         Object newWorld = minecraft.level;
         if (DistantHorizonsCompat.enabled() && newWorld != null
                 && manualRefreshRequested.getAndSet(false)) {
@@ -265,6 +264,10 @@ public final class RtDistantHorizonsTerrain {
     public long tableAddress() {
         Proxy proxy = current;
         return proxy == null ? 0L : proxy.table.deviceAddress;
+    }
+
+    public int residentSectionCount() {
+        return current == null ? 0 : current.entries.size();
     }
 
     public long emissiveRevision() {

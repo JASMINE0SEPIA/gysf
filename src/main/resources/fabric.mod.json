@@ -1,12 +1,18 @@
 {
   "schemaVersion": 1,
-  "id": "caustica",
+  "id": "gysf",
+  "provides": ["caustica"],
   "version": "${version}",
-  "name": "Caustica",
+  "name": "gysf",
   "description": "Hardware-ray-traced renderer with DLSS Ray Reconstruction for the Minecraft Vulkan backend.",
   "authors": [
-    "i"
+    "ComfyFluffy",
+    "JASMINE0SEPIA"
   ],
+  "contact": {
+    "sources": "https://github.com/JASMINE0SEPIA/gysf",
+    "issues": "https://github.com/JASMINE0SEPIA/gysf/issues"
+  },
   "license": "LGPL-3.0-or-later",
   "environment": "client",
   "entrypoints": {

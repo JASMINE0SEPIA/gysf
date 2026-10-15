@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - "jasmine/**"
       - "arena/**"
     paths:
       - ".github/workflows/**"
@@ -433,7 +434,7 @@ jobs:
       - name: Upload bundled mod JAR (GPU runtime unverified)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: caustica-bundled-jar
+          name: gysf-bundled-jar
           path: |
             build/libs/*.jar
             !build/libs/*-sources.jar

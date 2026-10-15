@@ -123,7 +123,7 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
         float2 uv = bary.x * uvs[i0] + bary.y * uvs[i1] + bary.z * uvs[i2];
         Prim epr = ConstPtr<Prim>(g.primAddr)[pid];
         int texSlot = int(epr.tint.w + 0.5);
-        MaterialHeader materialHeader;
+        MaterialHeader materialHeader = (MaterialHeader)0;
         bool stochasticAlpha = false;
         if (instanceKind == ENTITY_BIT) {
             materialHeader = ConstPtr<MaterialHeader>(pc.materialTableAddr)[epr.materialId];

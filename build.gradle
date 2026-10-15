@@ -26,7 +26,6 @@ repositories {
 
 loom {
 	// Client-only mod; keep the complete client JAR, including RenderPearl.
-	clientOnlyMinecraftJar()
 	runs {
 		client {
 			client()
@@ -64,6 +63,49 @@ dependencies {
 	include implementation("com.electronwill.night-config:toml:3.8.3")
 }
 
+sourceSets {
+    smokeTest {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.runtimeClasspath
+    }
+}
+configurations {
+    smokeTestImplementation.extendsFrom implementation
+    smokeTestRuntimeOnly.extendsFrom runtimeOnly
+}
+dependencies {
+    if (project.hasProperty('vooxxySmoke')) {
+        def providerJars = fileTree('../voxy-vulkan-26.3/build/libs') {
+            include 'voxy-vulkan-*.jar'
+            exclude '*-sources.jar'
+        }.files.sort { it.lastModified() }
+        if (providerJars.empty) throw new GradleException('Build vooxxy before running the joint smoke test.')
+        smokeTestRuntimeOnly files(providerJars.last())
+    }
+}
+loom {
+    mods {
+        gysf { sourceSet sourceSets.main }
+        gysf_smoke { sourceSet sourceSets.smokeTest }
+    }
+    runs {
+        smokeClient {
+            client()
+            source sourceSets.smokeTest
+            runDir 'run-smoke'
+            vmArg '-Xmx4G'
+            vmArg '-Xss16m'
+            vmArg '--enable-native-access=ALL-UNNAMED'
+            vmArg '-Dcaustica.rt.spp=1'
+            vmArg '-Dcaustica.rt.maxBounces=2'
+            vmArg '-Dvoxy.external.maxDistanceBlocks=512'
+            if (project.hasProperty('vooxxySmoke')) vmArg '-Dgysf.smoke.vooxxy=true'
+            programArgs '--offlineDeveloperMode', '--graphicsBackend', 'VULKAN'
+            if (project.hasProperty('validateVulkan')) programArgs '--vulkanValidation', '--renderDebugLabels'
+        }
+    }
+}
+
 processResources {
 	inputs.property "version", project.version
 	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
@@ -78,6 +120,7 @@ processResources {
 def shaderGenRoot = layout.buildDirectory.dir("generated/shaders") // classpath root -> /caustica/rt/*.spv
 
 def resolveVulkanTool = { String name ->
+	if (name == "slangc" && project.hasProperty("slangcPath")) return file(project.property("slangcPath")).absolutePath
 	def exe = org.gradle.internal.os.OperatingSystem.current().windows ? ".exe" : ""
 	def sdk = System.getenv("VULKAN_SDK")
 	if (sdk) {
@@ -583,7 +626,7 @@ tasks.register("verifyModJar") {
 			def entry = zip.getEntry("fabric.mod.json")
 			if (entry == null) throw new GradleException("Missing fabric.mod.json")
 			def metadata = zip.getInputStream(entry).withCloseable { new JsonSlurper().parse(it) }
-			if (metadata.environment != "client" || metadata.id != "caustica" ||
+			if (metadata.environment != "client" || metadata.id != "gysf" ||
 					metadata.depends.minecraft != project.minecraft_version ||
 					metadata.version != project.version.toString() || metadata.depends.java != ">=25" ||
 					metadata.depends.fabricloader != ">=${project.loader_version}" ||

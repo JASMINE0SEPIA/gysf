@@ -23,8 +23,33 @@ public final class VoxyCompat {
     private static volatile long observedSourceRevision = Long.MIN_VALUE;
     private static volatile int renderDistanceChunks;
     private static volatile boolean warned;
+    private static final Object FALLBACK_HOST_LOCK = new Object();
 
     private VoxyCompat() {
+    }
+
+    public static Object deviceHostLock() {
+        if (API == null) return FALLBACK_HOST_LOCK;
+        try {
+            return Class.forName("me.cortex.voxy.client.compat.CausticaBridge")
+                    .getMethod("deviceHostLock").invoke(null);
+        } catch (ReflectiveOperationException failure) {
+            throw new IllegalStateException("Installed Voxy provider cannot coordinate Vulkan queues", failure);
+        }
+    }
+
+    /** Register world-render ownership before Voxy creates any world GPU resources. */
+    public static void initialize() {
+        if (API == null) return;
+        try {
+            Class.forName("me.cortex.voxy.client.compat.CausticaBridge")
+                    .getMethod("registerExternalRenderer", java.util.function.BooleanSupplier.class)
+                    .invoke(null, (java.util.function.BooleanSupplier)
+                            dev.comfyfluffy.caustica.client.VanillaRenderController::rtRuntimeWorkRequested);
+            CausticaMod.LOGGER.info("gysf connected to vooxxy external LOD provider");
+        } catch (ReflectiveOperationException failure) {
+            throw new IllegalStateException("Installed Voxy bridge cannot transfer render ownership", failure);
+        }
     }
 
     public static boolean enabled() {
@@ -145,8 +170,7 @@ public final class VoxyCompat {
             observedSourceRevision = Long.MIN_VALUE;
             if (!warned) {
                 warned = true;
-                CausticaMod.LOGGER.warn("Voxy is installed but its Caustica LOD bridge failed; "
-                        + "use the bundled no-Sodium Voxy build", failure);
+                CausticaMod.LOGGER.warn("vooxxy external LOD update failed; distant terrain is unavailable", failure);
             }
         }
     }
