@@ -103,6 +103,17 @@ Slang temporal probe checks 12960 phase/position/slider/interval/footprint
 combinations against direct previous-field evaluation; visual temporal
 acceptance and long-distance anchor continuity still need separate checks.
 
+gysf 0.6.2 transports each wave's full-origin and long-time phase in double on
+the CPU, then evaluates rebased positions and a short clock interval on the GPU.
+The incommensurate spectrum keeps its authored shape; world coordinates are no
+longer reduced modulo 4096 and water no longer restarts its phase every hour.
+Current and previous wave times share an eight-second base, including negative
+previous times immediately after a base transition. The reflected world-data
+record carries seven 32-byte domains; provider API 6 and its Vulkan 8 JAR are
+unchanged. Host numerical checks include world-border coordinates, clock/base
+transitions and one-week timestamps. These are separate from GPU pixel/readback
+and continuous-frame image acceptance; shoreline clipping remains open.
+
 The external provider starts with a 1024-block selection cap; the smoke run uses
 512 blocks. `-Dvoxy.external.maxDistanceBlocks=<512..10000>` selects a development
 limit without changing the user's stored Voxy distance. Per-sprite PBR, LOD emitter sampling,

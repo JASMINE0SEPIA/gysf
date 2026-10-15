@@ -795,3 +795,98 @@ dark-band comparison. A still image cannot establish temporal stability.
 Displacement-proxy shoreline clipping, long-distance anchor continuity and
 continuous-frame visual acceptance remain open. PCL mods/configs/player saves
 were not changed.
+
+## Full-origin and clock phase transport: gysf 0.6.2
+
+Production source `99b00b24` fixes two discontinuities in the water field.
+Reducing the terrain origin modulo 4096 is not a symmetry of the incommensurate
+wave spectrum, so a rebase across that boundary changes water at a fixed world
+point. Resetting wave time modulo one hour likewise changes the phase. Keeping
+large float times also loses enough precision to spoil otherwise-correct
+spatial transport.
+
+An initial production-Slang diagnostic compares 7776 pairs of representations
+of the same world point at four short phases. The old 4096 policy fails 3072
+pairs, with maximum height difference 1.21171 blocks and gradient difference
+0.518091. A spatial-only transport fixes that grid but fails 344 / 11664 pairs
+after adding clock phases 1023.875 and 3599.5 seconds. Its maxima are
+0.00207889 blocks / 0.00126016 gradient vector length. The intermediate JAR,
+build and GPU log are retained in `water-domain/space-only/` with a NOT-ACCEPTED
+label. Its successful runtime is not acceptance of the failed expanded grid.
+
+The final transport uses the exact FP32 spatial coefficients and dispersion
+frequency on both CPU and shader sides. CPU double arithmetic combines each
+wave's full integer terrain origin and an eight-second time base, then reduces
+the resulting phases modulo two pi. GPU evaluation uses local hit coordinates
+and the small time relative to that base. The previous frame uses the same base,
+so its time can be negative just after a base change. First frames, pauses over
+0.25 s, time rewinds and output-history resets use neutral motion history.
+The physical field continues across the one-hour wall-clock wrap; the wrapped
+portal/glint clock remains separate.
+
+Seven reflected 32-byte domains add 224 bytes to the per-frame world data.
+They contain main/meander spatial coefficients, reduced phase offsets and the
+shared frequency. The cache rebuilds only when terrain origin, time base or
+speed changes. Java serialization and the shader struct are generated/reflected
+together. The provider API and Vulkan 8 artifact remain unchanged. This is not
+a measured GPU performance improvement. Changing the speed slider still has
+the pre-existing once-per-change phase warp described by its tooltip.
+
+`Test-WaterDomain.ps1` compiles the actual Java transport/clock classes to make
+fixtures, then feeds their coefficients and phases to production Slang via its
+host backend. The final 15552 pairs cover nine signed origins through
+approximately +/-30 million blocks, four positions, heights/speeds 0/1/4,
+footprints 0/2/16, and eight timestamps (0, 0.37, 8, 1023.875, 3599.5, 3600,
+86400 and 604800.125 seconds). One pair mode changes origin by (+512,-1024);
+the other changes the time-base representation by eight seconds while holding
+the physical point/time fixed. Both current and previous fields are compared.
+Height tolerance remains 0.0001 blocks and gradient tolerance 0.001. Coefficients
+and frequency are also compared with the authored Slang basis at 0.000002.
+
+| Final paired field diagnostic | Transport | Legacy mask/wrap control |
+| --- | ---: | ---: |
+| Pairs | 15552 | 15552 |
+| Failing pairs | 0 | 3936 |
+| Maximum height difference, blocks | 0.000023365 | 1.49498 |
+| Maximum gradient vector difference | 0.000059317 | 0.560481 |
+| Maximum authored-basis difference | 0 | 0 |
+
+The legacy clock control compares the continuous unwrapped phase reference
+against the old hourly-wrapped phase at the same physical timestamp; it is not
+two recorded game frames. The final numbers describe a Windows Slang C++ host
+backend, not numerical GPU readback. Three clock unit tests independently check
+adjacent history across zero/eight-second/hour/day/week boundaries, the exact
+history limit, pause/rewind/reset and sub-frame precision after a week. All 167
+Java tests pass, along with shader/SPIR-V, Minecraft ABI and JAR checks. The
+existing 12960 previous-field, 6338 surface and 2080 origin cases still pass.
+The surface finite-difference maximum is 0.00070478 in normal vector length;
+maximum height residual remains 0.0000152588 blocks. Source reassociation and
+transport leave these within their original tolerances.
+
+The final 2900-tick isolated joint run keeps wave height/speed at 4, 854x480,
+1 spp, four bounces and DLSS-RR, with Vulkan synchronization validation and
+the pinned provider JAR. OMM is off for the SDK checker defect. The motion
+route now crosses both signed 4096-block regions. It asserts actual near-terrain
+origins below -3800 and above 3800 in addition to observed player coordinates.
+
+| Final space/time transport run | Result |
+| --- | ---: |
+| RT frames | 5200 |
+| Peak provider meshes / resident RT LOD sections | 1353 / 541 |
+| Textured batches / cumulative water / precise-fluid quads | 2202 / 533961 / 607916 |
+| Replacement groups / validated partitions | 250 / 143 |
+| Native LOD peak / shutdown bytes | 170730816 / 0 |
+| Deliberate deferrals / distance reductions / recoveries | 5 / 2 / 3 |
+| Client ticks retaining fallback during pressure | 199 |
+| Observed player X / terrain origin X | -4351.5..4416.5 / -4352..4288 |
+
+Near/far fluid positions, face presence and 36 actual primitive normals still
+match at the initial fixture. Resource reload, Nether/Overworld return, manual
+RT refresh, motion, full provider-distance recovery before reload, save and
+shutdown pass without Vulkan findings or compositor/coverage failures. These
+are completed-work counters and lifecycle checks, not frame-time measurements.
+The GPU route does not visit the world border or run for a week; those cases
+belong to the host probe. Suspended topology fixtures affect these still images,
+which are not a clean-pool dark-band or continuous-frame temporal comparison.
+Exact shoreline clipping, arbitrary grazing proxy intersections and full visual/
+performance qualification remain open. PCL files and player saves are untouched.

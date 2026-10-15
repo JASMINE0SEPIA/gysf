@@ -170,3 +170,12 @@ independent evaluation at the previous frame's phase. Its 12960 cases cover
 height/speed 0, 1 and 4, six frame intervals through 0.25 s, five clock phases,
 16 positions and three footprints. This tests guide mathematics, not temporal
 image quality or the cost of tracing the complete scene.
+
+`scripts/Test-WaterDomain.ps1` feeds production Java phase transport into the
+production Slang host consumer. Its 15552 paired field comparisons cover signed
+origins through the world border, spatial rebases, eight-second time-base
+changes, hourly boundaries and one-week timestamps. `-Legacy` requires the old
+4096-coordinate / hourly-time policy to fail as a negative control. It is not a
+GPU output readback test. `-Dgysf.smoke.waterDomainMotion=true` extends the full
+motion route across positive/negative 4096-block regions and asserts observed
+terrain origins, not just issued teleport commands. Use it with `motion=true`.
