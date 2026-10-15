@@ -1,9 +1,7 @@
 package dev.comfyfluffy.caustica.rt.terrain;
 
 import dev.comfyfluffy.caustica.compat.VoxyCompat;
-import java.util.List;
-
-/** Verify actual provider -> reflection snapshot -> RT vertex packing on a still-water fixture cell. */
+/** Verify provider -> reflection snapshot -> production RT corner conversion without changing render counters. */
 public final class FluidHeightSmokeProbe {
     private FluidHeightSmokeProbe() {}
     public static void verify(boolean requirePrecise) {
@@ -18,12 +16,14 @@ public final class FluidHeightSmokeProbe {
                         || source.originY()+((raw>>>16)&31)!=111 || source.originZ()+((raw>>>11)&31)!=64) continue;
                 var model=mesh.model((int)(raw>>>26)&65535);
                 if(!model.water()) continue;
-                var packed=RtVoxyMesh.pack(List.of(new RtVoxyMesh.Slice(source,i,i+1)),0,0,m->42);
+                float[] vertices=new float[12],uv=new float[8];
+                RtVoxyMesh.corners(raw,model.face(1),true,1,vertices,uv,mesh.fluidHeights(i));
+                for(int vertex=0;vertex<4;vertex++) vertices[vertex*3+1]+=source.originY();
                 float expected=111+8f/9f,error=0;
-                for(int vertex=0;vertex<4;vertex++) error=Math.max(error,Math.abs(packed.positions()[vertex*3+1]-expected));
+                for(int vertex=0;vertex<4;vertex++) error=Math.max(error,Math.abs(vertices[vertex*3+1]-expected));
                 boolean precise=mesh.fluidHeights(i)!=0;
                 System.out.println("GYSF_FLUID_PRECISION: precise="+precise+" expectedY="+expected
-                        +" vertexY="+packed.positions()[1]+" maxErrorBlocks="+error);
+                        +" vertexY="+vertices[1]+" maxErrorBlocks="+error);
                 if(requirePrecise && (!precise || error>1e-5f))
                     throw new IllegalStateException("Still water did not retain near-mesher height through the optional API");
                 if(!precise && error<.01f) throw new IllegalStateException("Legacy control did not exercise height quantization");

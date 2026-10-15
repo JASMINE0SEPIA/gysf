@@ -458,3 +458,85 @@ still simplify geometry. More precise flow/shoreline heights, refraction-aware
 detail selection, different resource packs and longer travel remain separate
 acceptance work. Source, screenshots, paired JARs and raw records are kept in
 `artifacts/2026-10-15/underwater/`. No PCL files or player saves are changed.
+
+## Fluid height continuity: 0.5.0 / provider Vulkan 7
+
+The provider now exports optional API 6 UNORM16 corner heights before its legacy
+three-bit raster quantization. gysf copies that sidecar with the immutable mesh
+and uses it for RT top and side vertices. Both sides of the water handoff retain
+the shared 0.4.0 optical path. The old packed quad layout and API 5 reader fallback
+remain supported. Standalone raster generation does not allocate the sidecar.
+
+All 161 gysf Java tests and 32 provider Java tests pass, together with shader,
+SPIR-V, Minecraft ABI and JAR checks. New cases cover all four side/top edges,
+multiple voxel scales, immutable ownership, bucket order and reuse, and 10,001
+height inputs. UNORM16 error is bounded by about half of 1/65535 of a source
+voxel before FP32 position rounding; this does not recover coarse world detail.
+
+The isolated still-water cell at (64,111,64) is checked through actual provider
+export, reflective consumer copying and production RT corner conversion. Its
+expected world height is 111 + 8/9. Separate stable 4-bounce runs show:
+
+| Geometry path | Measured world Y | Maximum error in blocks | RT frames | Native LOD peak / shutdown bytes |
+| --- | ---: | ---: | ---: | ---: |
+| API 6 precise heights | 111.888885 | 0.0 | 2856 | 263355488 / 0 |
+| API 6 with legacy-height control | 111.875 | 0.013885498 | 2116 | 214325008 / 0 |
+
+Zero here means equal FP32 world coordinates for this fixture, not exact real
+arithmetic for every possible height. The old error is about 1.39 cm at block
+scale. Different cache/bootstrap progress makes these frame and allocation
+counts unsuitable as a performance comparison. Both runs finish with clean
+Vulkan/synchronization validation, no compositor/coverage failure and no
+allocation deferrals. Their first probe revision packed one synthetic quad;
+the probe now calls the same production corner converter without incrementing
+render counters. The initial provider JAR carried the pre-commit `20c82bd`
+suffix; its feature source was subsequently committed as `45b4a50b` and rebuilt
+as `voxy-vulkan-0.2.20-26.3-vulkan.7-dev-45b4a50.jar` for final verification.
+
+A separate compatibility run loads the real API 5 provider Vulkan 6 JAR, rather
+than just hiding API 6 data with a flag. gysf 0.5.0 discovers the missing optional
+method and keeps the old height path: 3084 RT frames, 998 peak resident RT LOD
+sections, zero precise-height quads, the expected 0.013885498-block legacy error,
+and 325652832 peak / zero shutdown native LOD bytes. It completes without Vulkan,
+synchronization, compositor or coverage failures.
+
+The pinned provider also passes its standalone Sodium Vulkan lifecycle run:
+38,303 block-state round trips, live edits, disabled-renderer control/rebuild,
+window/FOV/distance changes, resource reload, dimension return and save/shutdown.
+All Voxy GPU wrappers are released, with no Vulkan validation findings. An
+earlier attempt exposed a smoke-harness race: terrain invalidation could rebuild
+the renderer while the visual control had shut it down but left its desired
+state enabled. The harness now disables that state during the control and
+asserts it stays disabled; production renderer guards are unchanged.
+
+The final pinned API 6 pair completes the full 2900-tick route at 4 bounces,
+854x480, 1 spp and DLSS-RR, with Vulkan synchronization/coverage validation and
+real driver-budget assertions. OMM remains off for the installed SDK checker.
+A temporary 1 MiB LOD budget at ticks 400..600 deliberately denies allocations;
+the test requires published fallback to remain visible and provider selection
+to reduce, then recover fully before the resource reload at tick 1000.
+
+| Final lifecycle/motion/pressure run | Result |
+| --- | ---: |
+| RT frames | 5469 |
+| Peak selected sources / resident RT LOD sections | 1347 / 675 |
+| Textured batches / cumulative water quads | 2323 / 784482 |
+| Cumulative quads using precise fluid heights | 887502 |
+| Replacement groups / validated partitions | 286 / 140 |
+| Native LOD peak / shutdown bytes | 272630240 / 0 |
+| Deliberate allocation deferrals / distance reductions / recoveries | 5 / 2 / 3 |
+| Ticks retaining published fallback during pressure | 199 |
+
+The known fluid cell retains the expected precise height in this run too.
+The observed motion spans X=-383.5..464.5 and Y=80..192. Resource reload,
+Nether/Overworld return, explicit RT refresh, teleport, save and exit all finish
+without Vulkan VUIDs, synchronization hazards, device loss or compositor/coverage
+failure. Quads and swaps are cumulative work counters, not current residency
+or a benchmark. Post-reload captures still show progressive scene repopulation
+and are not used as stable water-image acceptance.
+
+This milestone removes a measured height discontinuity. Coarse voxel shape,
+fluid/ceiling occlusion parity, flowing shoreline fixtures, resource-pack
+variants and temporal transition acceptance remain separate work. Raw records
+and paired artifacts are kept in `artifacts/2026-10-15/fluid-api6/`. PCL mods,
+configuration and player saves remain untouched.

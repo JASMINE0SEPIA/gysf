@@ -222,6 +222,8 @@ public final class GysfSmokeClient implements ClientModInitializer {
             if(WATER_FIXTURE && lod.waterQuadCount()==0) throw new IllegalStateException("Textured LOD water was not converted");
             if(Boolean.getBoolean("gysf.smoke.requirePreciseFluids") && lod.preciseFluidQuadCount()==0)
                 throw new IllegalStateException("API 6 precise fluid geometry was not converted");
+            if(Boolean.getBoolean("gysf.smoke.expectLegacyFluids") && lod.preciseFluidQuadCount()!=0)
+                throw new IllegalStateException("Legacy compatibility run unexpectedly consumed API 6 heights");
             if(MEMORY_PRESSURE && (maxMemoryDeferrals==0 || lod.memoryReductionCount()==0 || !observedBudgetRecovery
                     || pressureFallbackFrames<20 || !observedReducedProvider))
                 throw new IllegalStateException("LOD memory degradation/recovery was not observed before resource reload");

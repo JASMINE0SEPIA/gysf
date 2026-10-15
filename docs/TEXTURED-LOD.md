@@ -137,3 +137,5 @@ Java/shader/ABI/JAR checks and the Vulkan scene tests.
 and verifies the actual RT vertices for a known level-zero still-water cell.
 `-PvooxxySmokeJar=<path>` selects a pinned provider JAR for API 5 compatibility
 checks instead of the newest sibling build.
+`-Dgysf.smoke.expectLegacyFluids=true` requires the precise-fluid conversion
+counter to remain zero in that compatibility run.
