@@ -636,3 +636,46 @@ Vulkan findings. The paired development package keeps the unchanged gysf 0.5.0
 JAR and `voxy-vulkan-0.2.20-26.3-vulkan.8-dev-0e4365e.jar`, with source pins,
 hashes, Java-suite summary and both diagnostic and strict raw logs. No smoke
 classes are shipped in either mod JAR.
+
+## Flow triangle normals and displaced-water slope: gysf 0.6.0
+
+Two new Java controls exercise the actual private `FluidCapture` and section
+packer through test-only reflection. They reproduce a geometric-normal bug:
+both triangles of a non-planar fluid quad receive the first triangle's normal.
+One normal therefore is not perpendicular to its triangle, and differs from the
+Voxy packer's per-triangle records. The planar face/tint control passes. The
+near capture now computes each triangle's own normal; water and lava material
+IDs, emission, tint, buckets and vertex/index layout are preserved. All three
+new controls and the previous 161 tests pass (164 total).
+
+`Test-WaterSurfaces.ps1` compiles the production Slang water module to its host
+backend and runs 6338 cases. It sets the actual pushed water parameters, checks
+the zero-height identity on sloped top/bottom faces, differentiates the complete
+height field numerically, checks surface-height residuals for vertical/oblique
+rays at four footprints, and compares equivalent rebased world coordinates.
+The strengths are 0, 0.25, 1 and 4; the dynamic grid uses 8 phases and 16 positions.
+Vertical height tolerance is 0.00003 blocks, oblique residual tolerance is
+0.001 blocks, and finite-difference normal tolerance is 0.003 in vector length.
+
+The old shader discards the rest-plane slope when forming the animated normal,
+even at zero amplitude. Its fixed 0.55-block search range also clips high slider
+values and does not account for a sloped rest plane's ray rate. The new shader
+adds the analytic wave gradient to the actual plane slope and scales the search
+envelope with the height multiplier and plane-relative ray rate. The iteration
+count and side-face fallback stay unchanged.
+
+| Production Slang diagnostic | Before | After |
+| --- | ---: | ---: |
+| Zero-amplitude identity failures / 162 | 160 | 0 |
+| Finite-difference normal failures / 6144 | 6144 | 0 |
+| Height-residual failures / 6144 | 1272 | 0 |
+| Rebase failures / 32 | 0 | 0 |
+| Maximum normal vector error | 0.821868 | 0.000668468 |
+| Maximum height residual, blocks | 1.05543 | 0.0000152588 |
+
+More than one assertion can fail in a case. The normal residual includes finite-
+difference approximation and FP32 error; it is not a measured image-quality
+score. The production origin probe still passes all 2080 cases and its old-TIR
+self-hit negative control. Shader/SPIR-V, Minecraft ABI and JAR checks pass.
+These changes affect gysf only; provider Vulkan 8 remains the pinned
+`0e4365e1` artifact. Raw controls are in `artifacts/2026-10-15/water-normals/`.

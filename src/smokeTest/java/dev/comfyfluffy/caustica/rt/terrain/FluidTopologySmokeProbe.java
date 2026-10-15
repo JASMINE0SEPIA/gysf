@@ -2,6 +2,7 @@ package dev.comfyfluffy.caustica.rt.terrain;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import dev.comfyfluffy.caustica.compat.VoxyCompat;
+import dev.comfyfluffy.caustica.rt.material.RtMaterialRegistry;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.block.FluidRenderer;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
@@ -13,6 +14,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import java.util.*;
+import java.lang.reflect.*;
 
 /** Real near mesher versus exported level-zero RT geometry, in an isolated frozen fixture. */
 public final class FluidTopologySmokeProbe {
@@ -86,8 +88,8 @@ public final class FluidTopologySmokeProbe {
     }
 
     public static void verify(Minecraft client,boolean allowMismatch) {
-        int mismatches=0,faces=0;
-        float worst=0;
+        int mismatches=0,faces=0,normalMismatches=0,normalTriangles=0;
+        float worst=0,worstNormal=0;
         if(expected.isEmpty()) throw new IllegalStateException("Topology placement was not published");
         for(var entry:expected.entrySet()) if(!client.level.getBlockState(entry.getKey()).equals(entry.getValue()))
             throw new IllegalStateException("Topology state not received at "+entry.getKey()+": expected "+entry.getValue());
@@ -128,6 +130,38 @@ public final class FluidTopologySmokeProbe {
                 }
             }
             if(!foundSection) throw new IllegalStateException("Level-zero fixture section missing: "+sample.name);
+            var packedNear=captureProduction(region,p,state,client.getModelManager().getFluidStateModelSet());
+            for(int tri=0;tri<packedNear.indices().length/3;tri++) {
+                float[] nearTriangle=new float[9];
+                for(int v=0;v<3;v++) {
+                    int index=packedNear.indices()[tri*3+v]*3;
+                    nearTriangle[v*3]=packedNear.positions()[index]+(p.getX()&~15);
+                    nearTriangle[v*3+1]=packedNear.positions()[index+1]+(p.getY()&~15);
+                    nearTriangle[v*3+2]=packedNear.positions()[index+2]+(p.getZ()&~15);
+                }
+                float[] matched=null;
+                for(float[] quad:far.values()) for(int t=0;t<2;t++) {
+                    int[] order=t==0?new int[]{0,1,2}:new int[]{0,2,3};
+                    float[] triangle=new float[9];
+                    for(int v=0;v<3;v++) System.arraycopy(quad,order[v]*3,triangle,v*3,3);
+                    if(vertexError(nearTriangle,triangle)<2e-5f) matched=triangle;
+                }
+                float error=Float.POSITIVE_INFINITY;
+                if(matched!=null) {
+                    float ax=matched[3]-matched[0],ay=matched[4]-matched[1],az=matched[5]-matched[2];
+                    float bx=matched[6]-matched[0],by=matched[7]-matched[1],bz=matched[8]-matched[2];
+                    float[] normal={ay*bz-az*by,az*bx-ax*bz,ax*by-ay*bx};
+                    float length=(float)Math.sqrt(normal[0]*normal[0]+normal[1]*normal[1]+normal[2]*normal[2]);
+                    error=0;
+                    for(int axis=0;axis<3;axis++) error=Math.max(error,Math.abs(normal[axis]/length-packedNear.material()[tri*12+axis]));
+                }
+                normalTriangles++;
+                if(error>1e-4f) {
+                    normalMismatches++;
+                    System.out.println("GYSF_FLUID_TOPOLOGY: normal mismatch sample="+sample.name+" triangle="+tri+" error="+error);
+                }
+                if(Float.isFinite(error)) worstNormal=Math.max(worstNormal,error);
+            }
             Set<Integer> union=new TreeSet<>(capture.quads.keySet()); union.addAll(far.keySet());
             for(int face:union) {
                 float[] a=capture.quads.get(face),b=far.get(face);
@@ -143,14 +177,34 @@ public final class FluidTopologySmokeProbe {
             System.out.println("GYSF_FLUID_TOPOLOGY: sample="+sample.name+" nearFaces="+capture.quads.keySet()+" farFaces="+new TreeSet<>(far.keySet()));
         }
         System.out.println("GYSF_FLUID_TOPOLOGY: phase="+phase+" edited="+edited+" samples="+checks.size()+" faces="+faces+" mismatches="+mismatches+" maxMatchedVertexError="+worst);
-        if(!allowMismatch && mismatches!=0) throw new IllegalStateException("Near/LOD fluid topology mismatch: "+mismatches);
+        System.out.println("GYSF_FLUID_NORMALS: phase="+phase+" triangles="+normalTriangles+" mismatches="+normalMismatches+" maxComponentError="+worstNormal);
+        if(!allowMismatch && (mismatches!=0 || normalMismatches!=0))
+            throw new IllegalStateException("Near/LOD fluid topology/normal mismatch: "+mismatches+"/"+normalMismatches);
+    }
+
+    private static RtTerrainMesher.PackedSection captureProduction(net.minecraft.client.renderer.block.BlockAndTintGetter region,
+            BlockPos pos,BlockState state,net.minecraft.client.renderer.block.FluidStateModelSet models) {
+        try {
+            Class<?> sectionType=Class.forName(RtTerrainMesher.class.getName()+"$SectionMesh");
+            Constructor<?> sectionCtor=sectionType.getDeclaredConstructor(); sectionCtor.setAccessible(true);
+            Object section=sectionCtor.newInstance();
+            Class<?> type=Class.forName(RtTerrainMesher.class.getName()+"$FluidCapture");
+            Constructor<?> ctor=type.getDeclaredConstructor(); ctor.setAccessible(true);
+            Object capture=ctor.newInstance();
+            for(var entry:Map.of("cur",section,"materials",RtMaterialRegistry.INSTANCE.requireSnapshot(),"water",true).entrySet()) {
+                Field field=type.getDeclaredField(entry.getKey()); field.setAccessible(true); field.set(capture,entry.getValue());
+            }
+            RtFluidMesher.tesselate(region,pos,(FluidRenderer.Output)capture,models,state,state.getFluidState());
+            Method pack=RtTerrainMesher.class.getDeclaredMethod("packSection",sectionType,float[].class); pack.setAccessible(true);
+            return (RtTerrainMesher.PackedSection)pack.invoke(null,section,new float[0]);
+        } catch(ReflectiveOperationException failure) { throw new IllegalStateException("Production fluid capture failed",failure); }
     }
 
     private static float vertexError(float[] a,float[] b) {
         float worst=0;
-        for(int v=0;v<4;v++) {
+        for(int v=0;v<a.length/3;v++) {
             float best=Float.POSITIVE_INFINITY;
-            for(int w=0;w<4;w++) {
+            for(int w=0;w<b.length/3;w++) {
                 float error=0;
                 for(int axis=0;axis<3;axis++) error=Math.max(error,Math.abs(a[v*3+axis]-b[w*3+axis]));
                 best=Math.min(best,error);

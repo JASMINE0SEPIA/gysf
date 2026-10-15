@@ -152,3 +152,11 @@ boundaries and repeats the comparison after both addition and removal. This
 1550-tick mode keeps its isolated world frozen until tick 1540 and explicitly
 skips dimension changes. It requires the topology comparison mode and tests
 dependency invalidation rather than just initial construction.
+
+The topology probe also captures the real private near-fluid primitive records
+through smoke-only reflection, then checks their triangle normals against the
+matching exported geometry. This adds no test API to the mod and does not
+increment RT conversion counters. `scripts/Test-WaterSurfaces.ps1` executes the
+production Slang wave evaluator against zero-amplitude, finite-difference normal,
+surface-height residual and world-anchor controls. It is independent of the
+origin probe and of GPU/temporal image acceptance.

@@ -27,7 +27,7 @@ public static const float WAVE_LAMBDA_RATIO = 1.618034; // incommensurate so cre
 public static const float WAVE_G = 9.81;
 public static const float2 WAVE_WIND = normalize(float2(1.0, 0.35)); // dominant travel direction
 public static const float WAVE_MEANDER = 1.55;        // crest phase-wobble amplitude (rad) on the long components
-public static const float WAVE_MAX_HEIGHT = 0.55;     // Newton search bound (blocks); > any in-phase crest
+public static const float WAVE_MAX_HEIGHT = 0.55;     // reference-strength search bound; scaled by the height slider
 public static const int   WAVE_NEWTON_STEPS = 3;      // height-field ray iterations from the rest-plane hit
 // Per-wave steepness a·k: energy stays in the swell. The old 10-octave 0.5 m chop read as the
 // repeating vanilla still-water tile sitting on top of the waves.
@@ -159,12 +159,16 @@ public void waterWaveGradTemporal(float2 p, float currentT, float previousT, flo
 // Perturb a (near-)horizontal water surface normal by the wave field. Flowing side faces (|n.y| small)
 // keep their flat geometric normal. `worldXZ` must be a world-stable coordinate (rebased hit + the pushed
 // anchor) so the ripples stay pinned in the world. `nGeo` is already oriented toward the viewer, so the
-// down-viewed underside (n.y < 0) takes the mirrored slope (-up).
+// down-viewed underside (n.y < 0) takes the mirrored slope. Add the wave gradient to the actual
+// rest-plane slope: replacing it with a horizontal normal changes flowing water even at zero height.
+public float3 waterSurfaceNormal(float3 nGeo, float2 gradient) {
+    return normalize(float3(nGeo.x-nGeo.y*gradient.x,nGeo.y,nGeo.z-nGeo.y*gradient.y));
+}
+
 public float3 applyWaterWaves(float3 nGeo, float2 worldXZ, float t, float footprint) {
     if (abs(nGeo.y) < 0.5) return nGeo;
     float2 grad = waterWaveGrad(worldXZ, t, footprint);
-    float3 up = normalize(float3(-grad.x, 1.0, -grad.y));
-    return nGeo.y >= 0.0 ? up : -up;
+    return waterSurfaceNormal(nGeo,grad);
 }
 
 // Geometric wave hit: the rest-plane triangle the BLAS actually contains, plus the height-field point
@@ -194,7 +198,7 @@ public WaterWaves flatWaterWaves(float3 planePos, float hitT, float3 nGeo) {
 // Intersect the viewing ray with the displaced height field, starting from the rest-plane hit the
 // acceleration structure reported. Crests are hit earlier, troughs later; the analytic gradient of
 // the same field becomes the shading normal, so glints, refraction and the visible relief stay in
-// lockstep. Side faces (|n.y| small) and near-horizontal rays keep the mesh hit.
+// lockstep. Side faces (|n.y| small) keep the mesh hit; grazing searches remain bounded.
 public WaterWaves evaluateWaterWaves(float3 ro, float3 rd, float hitT, float3 nGeo,
                                      float currentT, float previousT, float footprint) {
     float3 planePos = ro + rd * hitT;
@@ -204,9 +208,10 @@ public WaterWaves evaluateWaterWaves(float3 ro, float3 rd, float hitT, float3 nG
 
     float2 domain0 = planePos.xz + worldPush.waterAnchor.xy;
     float invNy = 1.0 / nGeo.y;
-    float absRdY = max(abs(rd.y), 0.05);
-    float tMin = max(hitT - WAVE_MAX_HEIGHT / absRdY, 0.0);
-    float tMax = hitT + WAVE_MAX_HEIGHT / absRdY;
+    float planeRate=dot(nGeo,rd)*invNy;
+    float maxTravel=WAVE_MAX_HEIGHT*waterWaveStrengthScale()/max(abs(planeRate),0.05);
+    float tMin = max(hitT-maxTravel,0.0);
+    float tMax = hitT+maxTravel;
     float t = hitT;
     float height = 0.0;
     float2 grad = float2(0.0, 0.0);
@@ -234,13 +239,12 @@ public WaterWaves evaluateWaterWaves(float3 ro, float3 rd, float hitT, float3 nG
     waterWaveFieldTemporal(domain, currentT, previousT, footprint,
             height, grad, previousHeight, previousGrad);
 
-    float orientation = nGeo.y >= 0.0 ? 1.0 : -1.0;
     WaterWaves waves;
     waves.position = pos;
     waves.planePos = planePos;
     waves.hitT = t;
-    waves.normal = orientation * normalize(float3(-grad.x, 1.0, -grad.y));
-    waves.previousNormal = orientation * normalize(float3(-previousGrad.x, 1.0, -previousGrad.y));
+    waves.normal = waterSurfaceNormal(nGeo,grad);
+    waves.previousNormal = waterSurfaceNormal(nGeo,previousGrad);
     waves.geometricNormal = nGeo;
     waves.motionPrev = float3(0.0, height - previousHeight, 0.0);
     return waves;

@@ -87,6 +87,14 @@ actual near and exported RT vertices before and after adding/removing a ceiling.
 Coarse voxel aggregation, resource-pack variants and detail selection still
 need broader geometric acceptance.
 
+gysf 0.6.0 records a geometric normal for each near-fluid triangle, matching the
+Voxy packer on non-planar flows. Animated water adds its spectrum gradient to
+the rest-plane slope rather than flattening it, and its bounded search scales
+with the height slider and ray rate relative to that plane. The production
+Slang host probes cover both orientations, strengths through 4, vertical/oblique
+rays, distance footprints and rebasing. Displaced-water shoreline clipping and
+temporal image fidelity remain separate from those numerical identities.
+
 The external provider starts with a 1024-block selection cap; the smoke run uses
 512 blocks. `-Dvoxy.external.maxDistanceBlocks=<512..10000>` selects a development
 limit without changing the user's stored Voxy distance. Per-sprite PBR, LOD emitter sampling,

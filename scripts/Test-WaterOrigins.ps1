@@ -11,7 +11,7 @@ try {
     if($LASTEXITCODE -ne 0) { throw 'Slang host compilation failed' }
     & cmake -S src/shaderTest -B $taskBuild -A x64
     if($LASTEXITCODE -ne 0) { throw 'Shader-test CMake configure failed' }
-    & cmake --build $taskBuild --config Release
+    & cmake --build $taskBuild --config Release --target water_origins
     if($LASTEXITCODE -ne 0) { throw 'Shader-test host build failed' }
     & (Join-Path $taskBuild 'Release/water_origins.exe')
     if($LASTEXITCODE -ne 0) { throw 'Water-origin behavioural probe failed' }

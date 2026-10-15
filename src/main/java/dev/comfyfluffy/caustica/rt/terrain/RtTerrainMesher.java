@@ -851,17 +851,6 @@ final class RtTerrainMesher {
             addTriUv(g, qu[0], qv[0], qu[1], qv[1], qu[2], qv[2]);
             addTriUv(g, qu[0], qv[0], qu[2], qv[2], qu[3], qv[3]);
 
-            float ex1 = qx[1] - qx[0], ey1 = qy[1] - qy[0], ez1 = qz[1] - qz[0];
-            float ex2 = qx[2] - qx[0], ey2 = qy[2] - qy[0], ez2 = qz[2] - qz[0];
-            float nx = ey1 * ez2 - ez1 * ey2;
-            float ny = ez1 * ex2 - ex1 * ez2;
-            float nz = ex1 * ey2 - ey1 * ex2;
-            float len = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
-            if (len > 1.0e-6f) {
-                nx /= len;
-                ny /= len;
-                nz /= len;
-            }
             int materialId = water ? materials.waterId() : materials.lavaId();
             // Biome water tint: vanilla's FluidRenderer bakes BiomeColors.getAverageWaterColor into the
             // per-vertex colour, so the average of the quad's four colours is this water body's tint. The
@@ -881,6 +870,14 @@ final class RtTerrainMesher {
             }
             FloatArrayList prim = g.prim;
             for (int t = 0; t < 2; t++) { // one {normal+emission, tint, mat} record per triangle
+                // A flowing quad need not be planar. Each record describes the triangle the BLAS
+                // actually contains, matching the Voxy packer and dielectric entering/exit tests.
+                int b=t==0?1:2,c=t==0?2:3;
+                float ex1=qx[b]-qx[0],ey1=qy[b]-qy[0],ez1=qz[b]-qz[0];
+                float ex2=qx[c]-qx[0],ey2=qy[c]-qy[0],ez2=qz[c]-qz[0];
+                float nx=ey1*ez2-ez1*ey2,ny=ez1*ex2-ex1*ez2,nz=ex1*ey2-ey1*ex2;
+                float len=(float)Math.sqrt(nx*nx+ny*ny+nz*nz);
+                if(len>1.0e-6f) { nx/=len; ny/=len; nz/=len; }
                 prim.add(nx);
                 prim.add(ny);
                 prim.add(nz);
