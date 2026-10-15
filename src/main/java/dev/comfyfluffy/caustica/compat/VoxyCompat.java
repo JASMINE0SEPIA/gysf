@@ -211,6 +211,22 @@ public final class VoxyCompat {
         return renderDistanceChunks;
     }
 
+    public static int requestedDistanceBlocks() {
+        return Math.min(configuredRenderDistanceChunks()*16,
+                Math.clamp(Integer.getInteger("voxy.external.maxDistanceBlocks",1024),512,10000));
+    }
+    public static boolean limitDistance(int blocks) {
+        if(API==null || API.distanceLimit==null) return false;
+        try { API.distanceLimit.invoke(null,blocks); return true; }
+        catch(ReflectiveOperationException failure) { throw new IllegalStateException("Voxy distance pressure control failed",failure); }
+    }
+    /** Provider Java-owned native allocations; driver process usage remains the combined authority. */
+    public static long ownedGpuBytes() {
+        if(API==null || API.ownedBytes==null) return -1;
+        try { return ((Number)API.ownedBytes.invoke(null)).longValue(); }
+        catch(ReflectiveOperationException failure) { return -1; }
+    }
+
     public static boolean reset() {
         Api api = API;
         clearLocalSnapshot();
@@ -254,6 +270,7 @@ public final class VoxyCompat {
         final Method setConfiguredIngestEnabled;
         final Method configuredRenderDistanceChunks;
         final Method setConfiguredRenderDistanceChunks;
+        final Method distanceLimit, ownedBytes;
         private volatile Class<?> meshType;
         private volatile Access meshAccess;
 
@@ -274,6 +291,12 @@ public final class VoxyCompat {
             configuredRenderDistanceChunks = bridge.getMethod("configuredRenderDistanceChunks");
             setConfiguredRenderDistanceChunks =
                     bridge.getMethod("setConfiguredRenderDistanceChunks", int.class);
+            Method limit=null,bytes=null;
+            try { limit=bridge.getMethod("setExternalDistanceLimit",int.class); }
+            catch(NoSuchMethodException ignored) { }
+            try { bytes=bridge.getMethod("ownedGpuBytes"); }
+            catch(NoSuchMethodException ignored) { }
+            distanceLimit=limit; ownedBytes=bytes;
         }
 
         static Api create() {

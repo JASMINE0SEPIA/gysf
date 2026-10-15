@@ -78,6 +78,12 @@ reflection detail selection and a total-residency VRAM budget remain required
 before production qualification. Geometry beyond visited/imported terrain cannot
 be synthesized from the LOD cache.
 
+gysf 0.3.0 adds process-budget telemetry and native LOD allocation admission,
+including staging/scratch, compaction overlap and GPU retirement. Pressure can
+reduce a temporary provider distance and recover gradually without changing
+saved settings. See [GPU-MEMORY.md](GPU-MEMORY.md) for the measured scope and
+remaining whole-engine/long-travel limits.
+
 Progressive coverage, shader guides, shared Vulkan host synchronization,
 resource reload, dimension change, clean shutdown and motion performance are
 acceptance requirements. Automated CPU/ABI/SPIR-V checks are distinct from

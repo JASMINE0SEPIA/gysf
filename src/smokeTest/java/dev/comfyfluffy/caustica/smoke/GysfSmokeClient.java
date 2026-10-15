@@ -20,6 +20,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private static final String WORLD="gysf-26.3-smoke";
     private static final boolean TEXTURE_FIXTURE=Boolean.getBoolean("gysf.smoke.textureFixture");
     private static final boolean MOTION=Boolean.getBoolean("gysf.smoke.motion");
+    private static final boolean MEMORY_PRESSURE=Boolean.getBoolean("gysf.smoke.memoryPressure");
     private static final boolean VISUAL_ONLY=TEXTURE_FIXTURE && Boolean.getBoolean("gysf.smoke.visualOnly");
     private static final boolean VISUAL_CONTROL=TEXTURE_FIXTURE && (VISUAL_ONLY || Boolean.getBoolean("gysf.smoke.visualControl"));
     private int ticks,worldTicks,maxMeshes,maxRtSections;
@@ -29,6 +30,11 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private int exitTicks;
     private double motionMinX=Double.POSITIVE_INFINITY,motionMaxX=Double.NEGATIVE_INFINITY;
     private double motionMinY=Double.POSITIVE_INFINITY,motionMaxY=Double.NEGATIVE_INFINITY;
+    private String originalMemoryLimit;
+    private long maxMemoryDeferrals;
+    private boolean sawDriverBudget, observedBudgetRecovery;
+    private int pressureFallbackFrames;
+    private boolean observedReducedProvider;
     private java.util.concurrent.CompletableFuture<Void> reload;
     @Override public void onInitializeClient() { ClientTickEvents.END_CLIENT_TICK.register(this::tick); }
     private void tick(Minecraft client) {
@@ -59,6 +65,31 @@ public final class GysfSmokeClient implements ClientModInitializer {
         if (RtComposite.INSTANCE.hasFailed()) throw new IllegalStateException("RT compositor failed");
         maxMeshes=Math.max(maxMeshes,VoxyCompat.meshes().size());
         maxRtSections=Math.max(maxRtSections,dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.residentSectionCount());
+        var memoryContext=dev.comfyfluffy.caustica.rt.RtContext.currentOrNull();
+        if(memoryContext!=null) {
+            maxMemoryDeferrals=Math.max(maxMemoryDeferrals,memoryContext.lodMemory().deferralCount());
+            sawDriverBudget|=memoryContext.memoryBudget().driverReported();
+        }
+        if(MEMORY_PRESSURE && worldTicks==400) {
+            originalMemoryLimit=System.getProperty("gysf.voxy.memoryBudgetMiB");
+            System.setProperty("gysf.voxy.memoryBudgetMiB","1");
+            dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.requestFullRefresh();
+            System.out.println("GYSF_SMOKE: forced LOD allocation budget to 1 MiB");
+        }
+        if(MEMORY_PRESSURE && worldTicks==600) {
+            if(originalMemoryLimit==null) System.clearProperty("gysf.voxy.memoryBudgetMiB");
+            else System.setProperty("gysf.voxy.memoryBudgetMiB",originalMemoryLimit);
+            System.out.println("GYSF_SMOKE: restored original LOD allocation budget");
+        }
+        if(MEMORY_PRESSURE && worldTicks>600 && worldTicks<1000) {
+            var memoryLod=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE;
+            observedBudgetRecovery|=memoryLod.memoryRecoveryCount()>0 && memoryLod.memoryDistanceLimit()==0;
+        }
+        if(MEMORY_PRESSURE && worldTicks>400 && worldTicks<600 && maxMemoryDeferrals>0) {
+            if(dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.residentSectionCount()>0)
+                pressureFallbackFrames++;
+            observedReducedProvider|=VoxyCompat.renderDistanceChunks()*16<VoxyCompat.requestedDistanceBlocks();
+        }
         if (worldTicks==80) { client.player.connection.sendCommand("gamemode spectator"); client.player.connection.sendCommand("tp @s 0 140 0 0 20"); client.player.connection.sendCommand("time set noon"); }
         if (worldTicks==250) client.player.connection.sendCommand(TEXTURE_FIXTURE
                 ? "tp @s 0 140 128 180 20" : "tp @s 128 140 0 90 20");
@@ -112,6 +143,13 @@ public final class GysfSmokeClient implements ClientModInitializer {
             long textured=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.texturedBuildCount();
             long leafCutouts=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE.leafCutoutQuadCount();
             var lod=dev.comfyfluffy.caustica.rt.terrain.RtDistantHorizonsTerrain.INSTANCE;
+            if(MEMORY_PRESSURE && (maxMemoryDeferrals==0 || lod.memoryReductionCount()==0 || !observedBudgetRecovery
+                    || pressureFallbackFrames<20 || !observedReducedProvider))
+                throw new IllegalStateException("LOD memory degradation/recovery was not observed before resource reload");
+            if(Boolean.getBoolean("gysf.smoke.requireDriverBudget") && !sawDriverBudget)
+                throw new IllegalStateException("Driver memory budget extension was not active");
+            if(Boolean.getBoolean("gysf.smoke.noMemoryDeferrals") && maxMemoryDeferrals!=0)
+                throw new IllegalStateException("Unexpected LOD memory deferral in baseline run");
             if(MOTION && (lod.voxyReplacementSwapCount()==0 || lod.voxyCoverageCheckCount()==0))
                 throw new IllegalStateException("Voxy coverage validation or replacement handoffs missing");
             if(MOTION && (motionMinX>-300 || motionMaxX<400 || motionMinY>100 || motionMaxY<170))
@@ -124,6 +162,11 @@ public final class GysfSmokeClient implements ClientModInitializer {
             System.out.println("GYSF_SMOKE: PASS frames="+RtComposite.frameCounter()+" maxVoxyMeshes="+maxMeshes+" maxRtLodSections="+maxRtSections+" texturedBatches="+textured+" atlasSlot="+VoxyCompat.boundAtlasSlot()+" leafCutoutQuads="+leafCutouts
                     +" atomicSwaps="+lod.atomicVoxySwapCount()+" replacementSwaps="+lod.voxyReplacementSwapCount()+" coverageChecks="+lod.voxyCoverageCheckCount());
             if(MOTION) System.out.println("GYSF_SMOKE: observed motion x="+motionMinX+".."+motionMaxX+" y="+motionMinY+".."+motionMaxY);
+            if(memoryContext!=null) System.out.println("GYSF_SMOKE: memory live="+memoryContext.lodMemory().liveBytes()
+                    +" peak="+memoryContext.lodMemory().peakBytes()+" deferrals="+maxMemoryDeferrals
+                    +" reductions="+lod.memoryReductionCount()+" recoveries="+lod.memoryRecoveryCount()
+                    +" recoveredBeforeReload="+observedBudgetRecovery+" driverBudget="+sawDriverBudget
+                    +" pressureFallbackFrames="+pressureFallbackFrames+" reducedProvider="+observedReducedProvider);
             finished=true;
             client.disconnectWithSavingScreen();
         }

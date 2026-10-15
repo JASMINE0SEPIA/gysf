@@ -199,3 +199,75 @@ runs encounter different cached terrain and are not a timing comparison.
 
 The paired JARs, SHA-256 manifest, final screenshots and raw build/runtime logs
 are retained locally in `artifacts/2026-10-15/coverage/`.
+
+## Native LOD budget: gysf 0.3.0 and vooxxy Vulkan 6
+
+`check` passes 155 gysf tests and 25 provider tests (180 total), with no failures
+or errors. New tests cover concurrent reservations, VMA actual-size padding,
+rollback/destruction accounting, cached process-headroom estimates, unavailable
+driver estimates, reclaiming metadata, distance limits and recovery hysteresis.
+Shader/SPIR-V, Minecraft ABI and production JAR checks pass. See
+[GPU-MEMORY.md](GPU-MEMORY.md) for the accounting scope and primary references.
+
+The first extended joint GPU run enables memory-budget pressure injection,
+driver-budget assertions, 3D coverage validation, the material fixture and
+motion route. It still uses 854x480, 1 spp, 2 bounces, a requested 512-block
+LOD range and DLSS-RR with OMM disabled for the SDK checker issue.
+
+At tick 400 the isolated process quota changes to 1 MiB. Five allocation
+deferrals reduce the temporary provider distance to 256 then 128 blocks. The
+existing published native working set decreases from about 148 MiB to 18 MiB
+as out-of-window geometry retires; it is not forced below a newly lowered
+1 MiB quota by dropping visible fallback geometry. There are 199 ticks with a
+resident fallback during the injected pressure window. Restoring the original
+quota at tick 600 recovers distance through 256, 384 and the requested 512
+blocks before resource reload at tick 1000.
+
+The driver extension is active and reports a 7131 MiB budget for the largest
+device-local heap. The default native LOD quota is 1782 MiB. These are the
+driver's current guidelines, not a physical-VRAM guarantee. The sampled process
+usage includes Minecraft, provider resources, RT resources and vendor runtimes;
+the provider-owned counter is about 612 MiB and is not added to driver usage.
+
+| Injected-quota run | Result |
+| --- | ---: |
+| RT frames | 5596 |
+| Peak selected source meshes | 932 |
+| Peak RT BLAS sections | 618 |
+| Converted textured batches | 2375 |
+| Replacement groups / validated partitions | 475 / 166 |
+| Allocation deferrals / distance reductions / recovery steps | 5 / 2 / 3 |
+| Peak accounted native LOD allocation bytes | 202213936 |
+| Native LOD allocation bytes at shutdown | 0 |
+
+The run completes resource reload, Nether/Overworld round trip, variable-height
+motion, teleport, manual RT refresh, save and shutdown. No Vulkan VUID,
+synchronization hazard, device loss, coverage assertion, provider failure or
+compositor failure is reported. The existing OSHI/optional-DH startup warnings
+remain. The injection tests the consumer's quota path; it does not deliberately
+exhaust the physical GPU or prove behavior under every driver-heap pressure
+event. Extended travel, other GPUs and full-process allocation control remain
+outside this acceptance.
+
+The independent default-budget run uses the final provider `20c82bde` and
+requires zero deferrals (`gysf.smoke.noMemoryDeferrals=true`). It completes the
+same 2900-tick lifecycle/motion route with 5655 RT frames, peak 942 selected
+source meshes, 955 resident RT BLAS sections, 2468 converted textured batches,
+660 replacement groups and 262 validated partitions. The native LOD accounting
+peak is 300358048 bytes (about 286.4 MiB), including transient and retiring
+allocations. Deferrals, distance reductions and recovery steps are all zero;
+the temporary limit remains cleared. Accounted native LOD allocation bytes are
+zero at shutdown. Driver-budget and compositor assertions pass, with no Vulkan
+VUID, synchronization hazard, device loss or provider failure.
+
+Visual inspection of the default fixture shows per-face textures, cutout leaves,
+glass and cached coastal terrain. The injected-quota view can still have an
+unfinished horizon while the restored selection streams in; restoring a
+distance limit does not mean all newly requested acceleration structures are
+already built. This is not a geometric seam, temporal-image or performance
+acceptance. The two runs visit/reuse different cached selections, so their
+working-set peaks and frame counts are not a controlled performance comparison.
+
+The final paired JARs, hashes, screenshots and raw records remain in ignored
+`artifacts/2026-10-15/memory/`. The production JARs exclude the smoke mod. No PCL
+mods, configuration or player saves are changed by these runs.

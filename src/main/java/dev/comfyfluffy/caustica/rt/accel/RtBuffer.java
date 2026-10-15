@@ -22,9 +22,10 @@ public final class RtBuffer {
 
     private final long vma;
     private boolean destroyed;
+    private final dev.comfyfluffy.caustica.rt.RtLodMemory.Ticket lodTicket;
 
     public RtBuffer(long vma, long handle, long allocation, long deviceAddress, long mapped, long size, int usage,
-                    boolean hostVisible, String label) {
+                    boolean hostVisible, String label, dev.comfyfluffy.caustica.rt.RtLodMemory.Ticket lodTicket) {
         this.vma = vma;
         this.handle = handle;
         this.allocation = allocation;
@@ -33,6 +34,7 @@ public final class RtBuffer {
         this.size = size;
         this.usage = usage;
         this.hostVisible = hostVisible;
+        this.lodTicket=lodTicket;
         VulkanDiagnostics.registerBuffer(deviceAddress, size, handle, label);
     }
 
@@ -40,6 +42,7 @@ public final class RtBuffer {
         if (!destroyed && handle != 0L) {
             VulkanDiagnostics.unregisterBuffer(deviceAddress, handle);
             Vma.vmaDestroyBuffer(vma, handle, allocation);
+            if(lodTicket!=null) lodTicket.close();
             destroyed = true;
         }
     }

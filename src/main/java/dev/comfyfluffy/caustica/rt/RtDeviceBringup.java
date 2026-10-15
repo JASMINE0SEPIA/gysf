@@ -431,6 +431,8 @@ public final class RtDeviceBringup {
     private static List<String> supportedOptionalExtensions(VulkanPhysicalDevice physicalDevice,
                                                              FeatureSupport support) {
         List<String> supported = new ArrayList<>();
+        if (physicalDevice.hasDeviceExtension(org.lwjgl.vulkan.EXTMemoryBudget.VK_EXT_MEMORY_BUDGET_EXTENSION_NAME))
+            supported.add(org.lwjgl.vulkan.EXTMemoryBudget.VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
         if (support.omm) {
             supported.add(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME);
         }

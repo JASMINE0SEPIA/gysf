@@ -4,6 +4,8 @@ import dev.comfyfluffy.caustica.CausticaMod;
 import dev.comfyfluffy.caustica.compat.DistantHorizonsCompat;
 import dev.comfyfluffy.caustica.rt.RtContext;
 import dev.comfyfluffy.caustica.rt.RtGpuExecutor;
+import dev.comfyfluffy.caustica.rt.RtLodMemory;
+import dev.comfyfluffy.caustica.compat.VoxyCompat;
 import dev.comfyfluffy.caustica.rt.accel.RtAccel;
 import dev.comfyfluffy.caustica.rt.accel.RtBuffer;
 import dev.comfyfluffy.caustica.CausticaConfig;
@@ -122,6 +124,8 @@ public final class RtDistantHorizonsTerrain {
     private boolean forceSourceRebuild;
     private long atomicVoxySwaps;
     private long voxyReplacementSwaps, voxyCoverageChecks;
+    private final LodBudgetController memoryController=new LodBudgetController();
+    private long nextMemoryLog;
     // Build bounded BLAS batches incrementally. Voxy publishes complete overlapping source groups;
     // DH retains its separate 2D progressive coverage policy. Both reuse unchanged compacted geometry.
     private BuildSession buildSession;
@@ -138,6 +142,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     public void frame(RtContext ctx, int rebaseX, int rebaseY, int rebaseZ) {
+        ctx.tickMemoryBudget();
         Minecraft minecraft = Minecraft.getInstance();
         Object newWorld = minecraft.level;
         if (DistantHorizonsCompat.enabled() && newWorld != null
@@ -172,6 +177,7 @@ public final class RtDistantHorizonsTerrain {
             // DH starts populating its repository after LevelRenderer. Avoid querying during world load.
             earliestBuildNanos = System.nanoTime() + 1_000_000_000L;
         }
+        pollMemoryBudget(ctx);
         var camera = minecraft.gameRenderer.mainCamera().position();
         int ax = Math.floorDiv((int) Math.floor(camera.x), ANCHOR_BLOCKS) * ANCHOR_BLOCKS;
         int az = Math.floorDiv((int) Math.floor(camera.z), ANCHOR_BLOCKS) * ANCHOR_BLOCKS;
@@ -275,6 +281,40 @@ public final class RtDistantHorizonsTerrain {
     public long atomicVoxySwapCount() { return atomicVoxySwaps; }
     public long voxyReplacementSwapCount() { return voxyReplacementSwaps; }
     public long voxyCoverageCheckCount() { return voxyCoverageChecks; }
+    public long memoryReductionCount() { return memoryController.reductionCount(); }
+    public long memoryRecoveryCount() { return memoryController.recoveryCount(); }
+    public int memoryDistanceLimit() { return memoryController.limitBlocks(); }
+
+    private void pollMemoryBudget(RtContext ctx) {
+        if(!VoxyCompat.active()) return;
+        long now=System.nanoTime();
+        var heap=ctx.memoryBudget();
+        long limit=ctx.lodMemoryLimitBytes(heap),live=ctx.lodMemory().liveBytes();
+        boolean comfortable=live<limit*3/4 && (!heap.driverReported() || heap.availableBytes()>heap.reserveBytes()*2);
+        if(memoryController.recover(VoxyCompat.requestedDistanceBlocks(),now,comfortable)) {
+            VoxyCompat.limitDistance(memoryController.limitBlocks());
+            capturedLodRevision=-1; nextRefresh=0;
+            CausticaMod.LOGGER.info("RT LOD memory recovered: temporary distance limit={} blocks (0=user requested)",memoryController.limitBlocks());
+        }
+        if(now>=nextMemoryLog) {
+            nextMemoryLog=now+5_000_000_000L;
+            CausticaMod.LOGGER.info("RT LOD memory: native={} MiB, peak={} MiB, limit={} MiB, providerOwned={} MiB, RT heap allocations={} MiB, processUsage={} MiB, heapBudget={} MiB, driverReported={}, temporaryDistance={}",
+                    live>>20,ctx.lodMemory().peakBytes()>>20,limit>>20,VoxyCompat.ownedGpuBytes()>>20,
+                    heap.rtAllocationBytes()>>20,heap.usageBytes()>>20,heap.budgetBytes()>>20,heap.driverReported(),memoryController.limitBlocks());
+        }
+    }
+
+    private void deferForMemory(RtContext ctx, RtLodMemory.Pressure pressure) {
+        abortBuildSession();
+        long now=System.nanoTime();
+        memoryController.pressure(VoxyCompat.requestedDistanceBlocks(),now);
+        boolean controlled=VoxyCompat.limitDistance(memoryController.limitBlocks());
+        capturedLodRevision=-1;
+        anchorX=anchorZ=Integer.MIN_VALUE;
+        earliestBuildNanos=nextRefresh=now+2_000_000_000L;
+        CausticaMod.LOGGER.info("RT LOD allocation deferred: {}; temporaryDistance={} blocks, providerControl={}; keeping published fallback",
+                pressure.getMessage(),memoryController.limitBlocks(),controlled);
+    }
 
     public long emissiveRevision() {
         Proxy proxy = current;
@@ -780,6 +820,9 @@ public final class RtDistantHorizonsTerrain {
         CausticaMod.LOGGER.info(
                 "DH progressive refresh started: current RT proxy remains active while {} planned batches stream in",
                 plan.size());
+        // Retire out-of-window sources before admitting replacements, including an all-empty proxy.
+        // Their native bytes stay charged until the graphics retirement callback actually destroys them.
+        if(buildSession.transition!=null && buildSession.coverageChanged) publishBuildSession(ctx,false);
         serviceBuildSession(ctx);
     }
 
@@ -861,7 +904,7 @@ public final class RtDistantHorizonsTerrain {
                           long taskEpoch, long revision) {
         PreparedSection prepared = null;
         boolean taskRegistered = false;
-        try {
+        try (var budgetScope=item.volume!=null ? ctx.lodAllocations() : null) {
             // Only one changed/new bounded batch is prepared at a time. Unchanged source meshes never
             // allocate staging, build inputs, scratch, or replacement BLAS memory. Compaction follows the
             // same player-facing toggle as vanilla terrain sections.
@@ -905,6 +948,7 @@ public final class RtDistantHorizonsTerrain {
             if (taskRegistered) finishActiveTask();
             if (prepared != null) RtSectionBuilder.destroy(prepared);
             pending = false;
+            if(t instanceof RtLodMemory.Pressure pressure) { deferForMemory(ctx,pressure); return; }
             abortBuildSession();
             requestRetry();
             CausticaMod.LOGGER.warn("Failed to prepare Distant Horizons RT proxy batch", t);
@@ -914,7 +958,7 @@ public final class RtDistantHorizonsTerrain {
     private void submitCompaction(RtContext ctx, PreparedSection prepared, PlannedBatch item,
                                   long taskEpoch, long revision, RtGpuExecutor.Build sourceBuild) {
         RtAccel.PreparedTerrainCompaction compaction;
-        try {
+        try (var budgetScope=item.volume!=null ? ctx.lodAllocations() : null) {
             compaction = RtAccel.prepareTerrainCompaction(ctx, prepared.blas());
         } catch (Throwable t) {
             RtSectionBuilder.destroy(prepared);
@@ -979,6 +1023,7 @@ public final class RtDistantHorizonsTerrain {
             if (done.failure != null || prepared == null || session == null
                     || done.revision != session.revision) {
                 if (prepared != null) destroyBuilt(prepared);
+                if(done.failure instanceof RtLodMemory.Pressure pressure) { deferForMemory(ctx,pressure); continue; }
                 abortBuildSession();
                 requestRetry();
                 if (done.failure != null) {
@@ -1092,8 +1137,10 @@ public final class RtDistantHorizonsTerrain {
                 }
                 return;
             }
-            table = ctx.createBuffer(Math.max(32L, Math.multiplyExact(32L, count)), VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true,
-                    "Distant Horizons RT proxy table " + count + " batches");
+            try(var budgetScope=session.transition!=null ? ctx.lodMetadata() : null) {
+                table = ctx.createBuffer(Math.max(32L, Math.multiplyExact(32L, count)), VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true,
+                        "Distant Horizons RT proxy table " + count + " batches");
+            }
             long p = table.mapped;
             for (int section = 0; section < count; section++) {
                 RtSectionTable.SectionGeom geom = entries.get(section).geom;
@@ -1144,6 +1191,7 @@ public final class RtDistantHorizonsTerrain {
             }
         } catch (Throwable t) {
             if (table != null) table.destroy();
+            if(t instanceof RtLodMemory.Pressure pressure) { deferForMemory(ctx,pressure); return; }
             abortBuildSession();
             requestRetry();
             CausticaMod.LOGGER.warn("Failed to publish Distant Horizons RT proxy", t);
@@ -1170,6 +1218,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private void reset(RtContext ctx, boolean clearCapturedLods) {
+        memoryController.reset(); VoxyCompat.limitDistance(0);
         epoch++;
         anchorX = anchorZ = Integer.MIN_VALUE;
         nextRefresh = 0L;
@@ -1198,6 +1247,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     public void shutdown(RtContext ctx) {
+        memoryController.reset(); VoxyCompat.limitDistance(0);
         epoch++;
         synchronized (activeLock) {
             while (activeTasks != 0) {

@@ -68,6 +68,14 @@ public final class RtContext {
     private final int accelerationStructureScratchAlignment;
     private final long updateAfterBindCombinedImageSamplerLimit;
     private long commandPool;
+    private final RtLodMemory lodMemory = new RtLodMemory();
+    private final ThreadLocal<Integer> lodAllocationDepth = ThreadLocal.withInitial(() -> 0);
+    private final ThreadLocal<Boolean> lodQuotaEnforced = ThreadLocal.withInitial(() -> true);
+    private final int localHeapIndex;
+    private final long localHeapBytes;
+    private RtLodMemory.Heap memorySample;
+    private long memorySampleAt;
+    private int memoryFrame;
 
     private RtContext(VulkanDevice device, long vma, int handleSize, int baseAlign, int handleAlign,
                       int maxSbtStride, int scratchAlign, long updateAfterBindCombinedImageSamplerLimit) {
@@ -83,6 +91,18 @@ public final class RtContext {
         this.maxShaderGroupStride = maxSbtStride;
         this.accelerationStructureScratchAlignment = scratchAlign;
         this.updateAfterBindCombinedImageSamplerLimit = updateAfterBindCombinedImageSamplerLimit;
+        int heapIndex=0; long heapBytes=0;
+        try (MemoryStack stack=MemoryStack.stackPush()) {
+            var memory=org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties.calloc(stack);
+            VK10.vkGetPhysicalDeviceMemoryProperties(vk.getPhysicalDevice(),memory);
+            for(int i=0;i<memory.memoryHeapCount();i++) {
+                var heap=memory.memoryHeaps(i);
+                if((heap.flags()&VK10.VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)!=0 && heap.size()>heapBytes) {
+                    heapIndex=i; heapBytes=heap.size();
+                }
+            }
+        }
+        localHeapIndex=heapIndex; localHeapBytes=heapBytes;
         this.gpuExecutor = new RtGpuExecutor(this);
     }
 
@@ -122,7 +142,8 @@ public final class RtContext {
             // BDA-enabled allocator (vanilla's createVma omits the flag).
             VmaVulkanFunctions fns = VmaVulkanFunctions.calloc(stack).set(phys.getInstance(), vk);
             VmaAllocatorCreateInfo aci = VmaAllocatorCreateInfo.calloc(stack)
-                    .flags(Vma.VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT)
+                    .flags(Vma.VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT
+                            | (vk.getCapabilities().VK_EXT_memory_budget ? Vma.VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT : 0))
                     .instance(phys.getInstance())
                     .vulkanApiVersion(VK12.VK_API_VERSION_1_2)
                     .device(vk)
@@ -190,6 +211,50 @@ public final class RtContext {
 
     public RtGpuExecutor gpuExecutor() {
         return gpuExecutor;
+    }
+
+    public RtLodMemory lodMemory() { return lodMemory; }
+    public void tickMemoryBudget() { Vma.vmaSetCurrentFrameIndex(vma, ++memoryFrame); }
+    public long lodMemoryLimitBytes(RtLodMemory.Heap heap) {
+        return RtLodMemory.limitBytes(Long.getLong("gysf.voxy.memoryBudgetMiB",0L),heap.budgetBytes());
+    }
+    /** The driver estimate is process-wide; RT allocation statistics are a separate diagnostic value. */
+    public synchronized RtLodMemory.Heap memoryBudget() {
+        long now=System.nanoTime();
+        if(memorySample!=null && now-memorySampleAt<250_000_000L) return memorySample;
+        try(MemoryStack stack=MemoryStack.stackPush()) {
+            var budgets=org.lwjgl.util.vma.VmaBudget.calloc(VK10.VK_MAX_MEMORY_HEAPS,stack);
+            Vma.vmaGetHeapBudgets(vma,budgets);
+            var own=budgets.get(localHeapIndex);
+            long usage=Math.max(0,own.usage()), budget=own.budget();
+            boolean driver=vk.getCapabilities().VK_EXT_memory_budget;
+            if(driver) {
+                var live=org.lwjgl.vulkan.VkPhysicalDeviceMemoryBudgetPropertiesEXT.calloc(stack).sType$Default();
+                var memory=org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties2.calloc(stack).sType$Default().pNext(live.address());
+                VK11.vkGetPhysicalDeviceMemoryProperties2(vk.getPhysicalDevice(),memory);
+                if(live.heapBudget(localHeapIndex)>0) {
+                    usage=Math.max(0,live.heapUsage(localHeapIndex)); budget=live.heapBudget(localHeapIndex);
+                } else driver=false;
+            }
+            if(budget<=0) budget=localHeapBytes;
+            memorySample=new RtLodMemory.Heap(usage,budget,own.statistics().allocationBytes(),lodMemory.liveBytes(),driver);
+            memorySampleAt=now;
+            return memorySample;
+        }
+    }
+    public AllocationScope lodAllocations() { return new AllocationScope(true); }
+    /** Small section tables must remain publishable to retire old geometry under pressure. */
+    public AllocationScope lodMetadata() { return new AllocationScope(false); }
+    public final class AllocationScope implements AutoCloseable {
+        private boolean closed;
+        private final boolean previousEnforcement;
+        private AllocationScope(boolean enforce) {
+            previousEnforcement=lodQuotaEnforced.get();
+            lodAllocationDepth.set(lodAllocationDepth.get()+1); lodQuotaEnforced.set(enforce);
+        }
+        @Override public void close() {
+            if(!closed) { lodAllocationDepth.set(lodAllocationDepth.get()-1); lodQuotaEnforced.set(previousEnforcement); closed=true; }
+        }
     }
 
     VulkanQueue computeQueue() {
@@ -270,6 +335,12 @@ public final class RtContext {
         }
         long handle = 0L;
         long allocation = 0L;
+        RtLodMemory.Ticket lodTicket=null;
+        if(lodAllocationDepth.get()>0) {
+            var heap=memoryBudget();
+            lodTicket=lodMemory.reserve(size,lodQuotaEnforced.get()?lodMemoryLimitBytes(heap):Long.MAX_VALUE,
+                    heap,!hostVisible && lodQuotaEnforced.get());
+        }
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkBufferCreateInfo bci = VkBufferCreateInfo.calloc(stack).sType$Default()
                     .size(size).usage(usage | VK12.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
@@ -283,6 +354,8 @@ public final class RtContext {
                     : Vma.VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE);
             if (hostVisible) {
                 aci.flags(hostAccessFlags | Vma.VMA_ALLOCATION_CREATE_MAPPED_BIT);
+            } else if(lodTicket!=null) {
+                aci.flags(aci.flags()|Vma.VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT);
             }
             if (addressAlignment != 0L) {
                 // LWJGL's VMA binding does not expose vmaCreateBufferWithAlignment (the alignment
@@ -295,9 +368,13 @@ public final class RtContext {
             LongBuffer pBuf = stack.mallocLong(1);
             PointerBuffer pAlloc = stack.mallocPointer(1);
             VmaAllocationInfo info = VmaAllocationInfo.calloc(stack);
-            check(Vma.vmaCreateBuffer(vma, bci, aci, pBuf, pAlloc, info), "vmaCreateBuffer");
+            int allocationResult=Vma.vmaCreateBuffer(vma,bci,aci,pBuf,pAlloc,info);
+            if(lodTicket!=null && allocationResult==VK10.VK_ERROR_OUT_OF_DEVICE_MEMORY)
+                throw lodMemory.nativeFailure(size,lodMemoryLimitBytes(memoryBudget()));
+            check(allocationResult, "vmaCreateBuffer");
             handle = pBuf.get(0);
             allocation = pAlloc.get(0);
+            if(lodTicket!=null) lodTicket.commit(info.size());
             RtDebugLabels.nameBuffer(this, handle, label);
             VkBufferDeviceAddressInfo bdai = VkBufferDeviceAddressInfo.calloc(stack).sType$Default().buffer(handle);
             long address = VK12.vkGetBufferDeviceAddress(vk, bdai);
@@ -309,11 +386,12 @@ public final class RtContext {
                         + Long.toUnsignedString(address, 16) + " is not aligned to " + addressAlignment);
             }
             return new RtBuffer(vma, handle, allocation, address, hostVisible ? info.pMappedData() : 0L,
-                    size, usage, hostVisible, label);
+                    size, usage, hostVisible, label, lodTicket);
         } catch (Throwable t) {
             if (handle != 0L) {
                 Vma.vmaDestroyBuffer(vma, handle, allocation);
             }
+            if(lodTicket!=null) lodTicket.close();
             throw t;
         }
     }
@@ -529,6 +607,8 @@ public final class RtContext {
             commandPool = 0L;
         }
         if (vma != 0L) {
+            CausticaMod.LOGGER.info("RT LOD native shutdown: live={} bytes, peak={} bytes, deferrals={}",
+                    lodMemory.liveBytes(),lodMemory.peakBytes(),lodMemory.deferralCount());
             Vma.vmaDestroyAllocator(vma);
         }
         instance = null;
