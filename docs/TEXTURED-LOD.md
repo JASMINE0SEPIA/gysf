@@ -163,3 +163,10 @@ origin probe and of GPU/temporal image acceptance.
 `-Dgysf.smoke.waveStrength=<0..4>` explicitly sets and verifies the isolated
 run's wave-height multiplier. It enables waves and keeps speed 1 for an animated
 full run; the comparison mode still freezes its wave phase for captures.
+`-Dgysf.smoke.waveSpeed=<0..4>` selects and verifies a different animated speed;
+comparison captures remain frozen and full runs resume the requested speed.
+`scripts/Test-WaterTemporal.ps1` compares the production temporal field with an
+independent evaluation at the previous frame's phase. Its 12960 cases cover
+height/speed 0, 1 and 4, six frame intervals through 0.25 s, five clock phases,
+16 positions and three footprints. This tests guide mathematics, not temporal
+image quality or the cost of tracing the complete scene.

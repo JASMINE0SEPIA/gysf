@@ -95,6 +95,14 @@ Slang host probes cover both orientations, strengths through 4, vertical/oblique
 rays, distance footprints and rebasing. Displaced-water shoreline clipping and
 temporal image fidelity remain separate from those numerical identities.
 
+gysf 0.6.1 evaluates the actual previous wave phase for reflection normals and
+vertical motion. The earlier first-order rewind exceeds the wave-height
+envelope at high speeds / long frame intervals within the accepted history
+window. Frozen or zero-height waves reuse the current field. The production
+Slang temporal probe checks 12960 phase/position/slider/interval/footprint
+combinations against direct previous-field evaluation; visual temporal
+acceptance and long-distance anchor continuity still need separate checks.
+
 The external provider starts with a 1024-block selection cap; the smoke run uses
 512 blocks. `-Dvoxy.external.maxDistanceBlocks=<512..10000>` selects a development
 limit without changing the user's stored Voxy distance. Per-sprite PBR, LOD emitter sampling,

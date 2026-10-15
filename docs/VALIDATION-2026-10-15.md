@@ -726,3 +726,72 @@ same reported maxima. This numerical evidence does not establish exact shoreline
 clipping, arbitrary grazing intersections or temporal image fidelity for the
 raygen displacement proxy. The shaderTest/smoke classes are excluded from the
 production JAR. PCL files and player saves remain untouched.
+
+## Previous-frame wave field: gysf 0.6.1
+
+Production source `6131ea0e` replaces the first-order temporal rewind used by
+primary-water reflection normals and vertical motion with evaluation at the
+actual previous phase. The current field is unchanged. Frozen, zero-height or
+same-phase water reuses that result; secondary water and guide-chain hits
+already pass equal times and do not need another spectrum walk. This requires
+no provider or push-data ABI change. Vulkan 8 stays pinned to `0e4365e1`.
+
+`scripts/Test-WaterTemporal.ps1` runs the production Slang temporal function via
+the host backend and compares its previous height/normal with direct evaluation
+at the previous phase. Its 12960 cases cover heights 0/1/4, speeds 0/1/4, five
+clock phases through 3599.5 s, 16 positions, three footprints (0/2/16 blocks) and
+six frame intervals through the CPU history window's 0.25 s limit. Acceptance
+is 0.0001 blocks for height and 0.001 in normal vector length. Current-field
+identity is checked separately at 0.000001. These thresholds were fixed before
+the production fix. The old algorithm fails 2514 cases; the fixed algorithm
+fails zero, including current-field identity.
+
+| Interval, seconds | Old failing cases | Old maximum height error, blocks | Old maximum normal vector error |
+| --- | ---: | ---: | ---: |
+| 0 | 0 | 0 | 0 |
+| 1/240 | 181 | 0.000947356 | 0.00183275 |
+| 1/60 | 459 | 0.0147618 | 0.0235977 |
+| 1/30 | 596 | 0.0547931 | 0.0938774 |
+| 0.1 | 638 | 0.439502 | 0.545067 |
+| 0.25 | 640 | 2.59633 | 1.09462 |
+
+All reported maxima span the complete height/speed/phase/position/footprint grid;
+they are not default-slider-only results. With the fix, previous-field error
+is zero in this direct same-backend comparison. This verifies the temporal
+math, not DLSS-RR image fidelity, independent physical accuracy or GPU cost.
+Animated primary water needs an additional derivative-free spectrum evaluation;
+frozen/secondary paths reuse the current result. No frame-time speedup is claimed.
+
+The existing 6338 surface cases and 2080 continuation-origin cases still pass,
+including the old-TIR negative control. Surface maxima remain 0.000668468 in
+normal length and 0.0000152588 blocks in height residual. All 164 Java tests,
+shader/SPIR-V compilation, Minecraft ABI, smoke-source compilation and production
+JAR checks pass. Test classes are not included in the mod. Raw records are in
+`artifacts/2026-10-15/water-temporal/`.
+
+The isolated joint run explicitly sets and retains both wave strength and
+speed at 4, with the pinned provider JAR. It completes 2900 ticks at 854x480,
+1 spp, four bounces, DLSS-RR and requested 512-block provider distance. OMM is
+off for the installed SDK checker defect; Vulkan synchronization validation is
+enabled. Initial fluid geometry and 36 real primitive triangle normals match,
+with the same vertex/normal maxima as the previous milestone.
+
+| Maximum-height / maximum-speed run | Result |
+| --- | ---: |
+| RT frames | 5223 |
+| Peak selected sources / resident RT LOD sections | 1353 / 752 |
+| Textured batches / cumulative water / precise-fluid quads | 2213 / 500795 / 582659 |
+| Replacement groups / validated partitions | 323 / 139 |
+| Native LOD peak / shutdown bytes | 234154160 / 0 |
+| Deliberate deferrals / distance reductions / recoveries | 5 / 2 / 3 |
+| Client ticks retaining fallback during pressure | 199 |
+
+Resource reload, Nether/Overworld return, manual RT refresh, movement
+X=-383.5..464.5 / Y=80..192, save and shutdown pass without Vulkan findings or
+compositor/coverage failures. Full distance recovers before reload. These work
+counters vary with streaming and are not a frame-time comparison. The topology
+fixtures add suspended shapes and their underwater image is not a clean-pool
+dark-band comparison. A still image cannot establish temporal stability.
+Displacement-proxy shoreline clipping, long-distance anchor continuity and
+continuous-frame visual acceptance remain open. PCL mods/configs/player saves
+were not changed.
