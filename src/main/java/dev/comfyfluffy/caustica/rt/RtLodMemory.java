@@ -9,9 +9,12 @@ public final class RtLodMemory {
         public long reserveBytes() { return Math.min(1024*MIB, Math.max(256*MIB, budgetBytes/10)); }
     }
     public static final class Pressure extends RuntimeException {
+        private final long requestedBytes;
         Pressure(String reason, long bytes, long live, long limit) {
             super(reason+": request="+bytes+", LOD live="+live+", limit="+limit, null, false, false);
+            requestedBytes=bytes;
         }
+        public long requestedBytes() { return requestedBytes; }
     }
     private long live, peak, deferrals;
 
@@ -35,18 +38,29 @@ public final class RtLodMemory {
         return new Ticket(bytes, limit, heap, devicePreferred);
     }
     private void check(long bytes, long limit, Heap heap, boolean devicePreferred) {
-        if (bytes > Math.max(0, limit-live)) {
+        String reason=rejection(bytes,limit,heap,devicePreferred);
+        if(reason!=null) {
             deferrals++;
-            throw new Pressure("LOD native allocation budget reached", bytes, live, limit);
+            throw new Pressure(reason,bytes,live,limit);
+        }
+    }
+    /** Admission preview for deferred refreshes; neither allocates a ticket nor counts another failure. */
+    public synchronized boolean canReserve(long bytes,long limit,Heap heap,boolean devicePreferred) {
+        if(bytes<0 || limit<0)throw new IllegalArgumentException("Negative memory size");
+        return rejection(bytes,limit,heap,devicePreferred)==null;
+    }
+    private String rejection(long bytes,long limit,Heap heap,boolean devicePreferred) {
+        if (bytes > Math.max(0, limit-live)) {
+            return "LOD native allocation budget reached";
         }
         // Cached driver readings already include allocations made by all allocators in this process.
         // Charge only LOD growth since that reading; never sum separate VMA heap usage estimates.
         long growth = Math.max(0, live-heap.observedLodBytes);
         long available = Math.max(0, heap.availableBytes()-growth);
         if (devicePreferred && heap.driverReported && bytes > Math.max(0, available-heap.reserveBytes())) {
-            deferrals++;
-            throw new Pressure("Driver heap headroom reserved for near rendering", bytes, live, limit);
+            return "Driver heap headroom reserved for near rendering";
         }
+        return null;
     }
     public final class Ticket implements AutoCloseable {
         private long bytes;

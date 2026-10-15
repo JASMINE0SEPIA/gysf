@@ -6,6 +6,7 @@ import com.mojang.blaze3d.vertex.QuadInstance;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import dev.comfyfluffy.caustica.CausticaConfig;
 import dev.comfyfluffy.caustica.CausticaMod;
+import dev.comfyfluffy.caustica.compat.VoxyCompat;
 import dev.comfyfluffy.caustica.rt.RtComposite;
 import dev.comfyfluffy.caustica.rt.RtContext;
 import dev.comfyfluffy.caustica.rt.RtDebugLabels;
@@ -133,6 +134,7 @@ public final class RtTerrain {
     private static final RtTerrain INSTANCE = new RtTerrain();
 
     private final Long2ObjectOpenHashMap<SectionGeom> resident = new Long2ObjectOpenHashMap<>();
+    private final NearBudgetController nearMemory=new NearBudgetController();
     // Persistent palette snapshots for tessellation regions (render-thread only); invalidated on dirty
     // sections, column unload/window-leave, and full clears.
     private final RtSectionSnapshots snapshots = new RtSectionSnapshots();
@@ -427,7 +429,12 @@ public final class RtTerrain {
         int pby = mc.player.getBlockY();
         int pbz = mc.player.getBlockZ();
         int pcx = pbx >> 4, pcz = pbz >> 4, psy = pby >> 4;
-        int r = horizontalChunks(mc);
+        int requestedRadius=horizontalChunks(mc);
+        int r=nearMemory.update(requestedRadius,VoxyCompat.active(),System.nanoTime(),ctx.memoryBudget());
+        if(windowValid && r!=windowRadius) {
+            CausticaMod.LOGGER.info("RT near memory window: {} -> {} chunks (requested {}); LOD ownership follows published readiness",
+                    windowRadius,r,requestedRadius);
+        }
         ClientChunkCache chunkSource = level.getChunkSource();
         int minSecY = level.getMinY() >> 4;
         int maxSecY = (level.getMinY() + level.getHeight() - 1) >> 4;
@@ -523,13 +530,17 @@ public final class RtTerrain {
         try (RtFrameStats.Scope ignored = RtFrameStats.FRAME.stage("terrain.snapshotDispatch")) {
             DispatchContext dispatch = null;
             int dispatchSlots = Math.min(asyncDispatchPerPass(), Math.max(0, maxInflight() - inFlight.size()));
+            boolean mayGrow=nearMemory.canDispatch(VoxyCompat.active(),ctx.memoryBudget());
+            // Keep edits responsive while growth is paused. Re-extraction atomically replaces an
+            // existing section; missing sections would increase the resident working set.
+            if(!mayGrow)dispatchSlots=Math.min(dispatchSlots,1);
             if (dispatchSlots > 0 && !reextract.isEmpty()) {
                 if (dispatch == null) {
                     dispatch = dispatchContext(ctx, level);
                 }
                 dispatchSlots -= dispatchReextract(dispatch, chunkSource, dispatchSlots, pcx, psy, pcz);
             }
-            if (dispatchSlots > 0 && !missing.isEmpty()) {
+            if (mayGrow && dispatchSlots > 0 && !missing.isEmpty()) {
                 if (dispatch == null) {
                     dispatch = dispatchContext(ctx, level);
                 }
@@ -1770,6 +1781,7 @@ public final class RtTerrain {
 
     /** Full teardown (world exit / shutdown): drain the GPU, then free everything incl. an in-flight build. */
     private void clear(RtContext ctx, boolean shutdown) {
+        nearMemory.reset();
         distantReadyMaskWords = new int[0];
         distantReadyMaskDirty = true;
         if (!shutdown) {

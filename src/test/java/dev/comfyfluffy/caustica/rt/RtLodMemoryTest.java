@@ -26,6 +26,28 @@ final class RtLodMemoryTest {
         assertEquals(80,memory.liveBytes()); assertEquals(1,memory.deferralCount());
         ticket.close(); assertEquals(0,memory.liveBytes());
     }
+    @Test void admissionPreviewWaitsForRealHeadroomWithoutRecountingTheSameFailure() {
+        var memory=new RtLodMemory();
+        var tight=new RtLodMemory.Heap(7497*MIB,6999*MIB,6198*MIB,0,true);
+        var rejected=assertThrows(RtLodMemory.Pressure.class,()->memory.reserve(108864,1749*MIB,tight,true));
+        assertEquals(108864,rejected.requestedBytes());
+        for(int i=0;i<100;i++)assertFalse(memory.canReserve(rejected.requestedBytes(),1749*MIB,tight,true));
+        assertEquals(1,memory.deferralCount());assertEquals(0,memory.liveBytes());
+        var healthy=new RtLodMemory.Heap(5000*MIB,6999*MIB,4000*MIB,0,true);
+        assertTrue(memory.canReserve(rejected.requestedBytes(),1749*MIB,healthy,true));
+        try(var ticket=memory.reserve(rejected.requestedBytes(),1749*MIB,healthy,true)) {
+            assertEquals(108864,memory.liveBytes());
+        }
+        assertEquals(0,memory.liveBytes());
+    }
+    @Test void admissionPreviewAlsoHonorsLiveTicketsAndTheChangedNativeQuota() {
+        var memory=new RtLodMemory();var ticket=memory.reserve(80,100,unknown(),true);
+        assertFalse(memory.canReserve(21,100,unknown(),true));
+        assertFalse(memory.canReserve(1,10,unknown(),true));
+        assertTrue(memory.canReserve(20,100,unknown(),true));
+        assertEquals(0,memory.deferralCount());
+        ticket.close();assertTrue(memory.canReserve(21,100,unknown(),true));
+    }
     @Test void alignmentRejectionCanRollBackTheEntireNativeAllocation() {
         var memory=new RtLodMemory(); var ticket=memory.reserve(90,100,unknown(),true);
         assertThrows(RtLodMemory.Pressure.class,()->ticket.commit(128));

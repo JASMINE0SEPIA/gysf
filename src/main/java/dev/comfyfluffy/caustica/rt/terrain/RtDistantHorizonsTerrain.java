@@ -125,6 +125,7 @@ public final class RtDistantHorizonsTerrain {
     private long atomicVoxySwaps;
     private long voxyReplacementSwaps, voxyCoverageChecks;
     private final LodBudgetController memoryController=new LodBudgetController();
+    private long rejectedAllocationBytes;
     private long nextMemoryLog;
     // Build bounded BLAS batches incrementally. Voxy publishes complete overlapping source groups;
     // DH retains its separate 2D progressive coverage policy. Both reuse unchanged compacted geometry.
@@ -217,7 +218,7 @@ public final class RtDistantHorizonsTerrain {
         // bursts for many seconds; wait for a quiet window, then rebuild only changed source meshes.
         boolean replacementBusy = buildSession != null || packPending;
         if (!pending && !cpuPending && !replacementBusy && now >= earliestBuildNanos
-                && RtMaterialRegistry.INSTANCE.isReady()
+                && RtMaterialRegistry.INSTANCE.isReady() && refreshAdmissionAllowed(ctx)
                 && (current == null || cameraCellChanged || refreshUploadedLods)) {
             anchorX = ax;
             anchorZ = az;
@@ -307,6 +308,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private void deferForMemory(RtContext ctx, RtLodMemory.Pressure pressure) {
+        rejectedAllocationBytes=pressure.requestedBytes();
         abortBuildSession();
         long now=System.nanoTime();
         memoryController.pressure(VoxyCompat.requestedDistanceBlocks(),now);
@@ -316,6 +318,14 @@ public final class RtDistantHorizonsTerrain {
         earliestBuildNanos=nextRefresh=now+2_000_000_000L;
         CausticaMod.LOGGER.info("RT LOD allocation deferred: {}; temporaryDistance={} blocks, providerControl={}; keeping published fallback",
                 pressure.getMessage(),memoryController.limitBlocks(),controlled);
+    }
+
+    private boolean refreshAdmissionAllowed(RtContext ctx) {
+        if(rejectedAllocationBytes==0)return true;
+        var heap=ctx.memoryBudget();
+        if(!ctx.lodMemory().canReserve(rejectedAllocationBytes,ctx.lodMemoryLimitBytes(heap),heap,true))return false;
+        rejectedAllocationBytes=0;
+        return true;
     }
 
     public long emissiveRevision() {
@@ -1220,7 +1230,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private void reset(RtContext ctx, boolean clearCapturedLods) {
-        memoryController.reset(); VoxyCompat.limitDistance(0);
+        memoryController.reset(); rejectedAllocationBytes=0; VoxyCompat.limitDistance(0);
         epoch++;
         anchorX = anchorZ = Integer.MIN_VALUE;
         nextRefresh = 0L;
@@ -1249,7 +1259,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     public void shutdown(RtContext ctx) {
-        memoryController.reset(); VoxyCompat.limitDistance(0);
+        memoryController.reset(); rejectedAllocationBytes=0; VoxyCompat.limitDistance(0);
         epoch++;
         synchronized (activeLock) {
             while (activeTasks != 0) {
