@@ -4,6 +4,14 @@ Host: Windows 11, JDK 25, Minecraft 26.3, Fabric Loader 0.19.5, NVIDIA RTX 5060
 Laptop GPU (8 GiB), driver 616.92. All runtime checks use isolated development
 worlds. No PCL instance, player world or installed mod was modified.
 
+**2026-10-16 validation audit:** the earlier VUID-only filter could miss bare
+NGX `WRITE_AFTER_WRITE` reports. Historical RR-enabled "validation clean" and
+"no synchronization hazards" claims below need re-audit with the strict log
+checker before acceptance. Functional counters/build evidence remain as recorded;
+non-RR runs are not automatically implicated by this finding. See
+[NGX clear synchronization](NGX-CLEAR-SYNC-2026-10-16.md) for the observed local
+failure, scoped repair and newly qualified evidence.
+
 ## CPU and packaging
 
 - `check compileSmokeTestJava`: 123 JUnit tests, zero failures/errors.

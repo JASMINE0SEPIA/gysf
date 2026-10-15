@@ -284,7 +284,7 @@ public void writeGuides(int2 pix, float3 primaryDir, float2 jndc, float2 size, f
     // would write. Reversed-Z (near=1, far=0), so DLSS gets the DepthInverted flag; sky's far hit -> ~0.
     // Clear transmission uses destination depth so the entire ordinary tuple describes one layer.
     float4 curClip = mul(worldPush.curViewProj, float4(gv_hitCamRel, 1.0));
-    float depth = curClip.w > 0.0 ? curClip.z / curClip.w : 0.0;
+    float depth = guideDeviceDepth(curClip);
 
     // NRD IN_VIEWZ / SVGF reprojection guide: linear view depth of the primary hit (positive, grows forward;
     // the perspective divide's w is exactly that distance). Sky/miss pixels place gv_hitCamRel at

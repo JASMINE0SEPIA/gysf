@@ -84,7 +84,7 @@ public bool restirEnabled() {
 }
 public bool waterWavesEnabled() { return worldFlag(worldPush, WORLD_FLAG_WAVES); }
 public bool sharcEnabled() { return worldFeature(worldPush, FEATURE_SHARC); }
-public bool cameraSubmerged() { return worldFlag(worldPush, WORLD_FLAG_SUBMERGED); }
+public bool cameraSubmerged() { return (worldPush.waterCamera.x & WORLD_FLAG_SUBMERGED) != 0u; }
 
 /** SSS strength after the player toggle: the material value, or a hard zero when SSS is disabled. */
 public float payloadActiveSss() { return sssEnabled() ? payloadSss() : 0.0; }

@@ -64,6 +64,7 @@ public final class RtFrameStats {
                     "entity.blasRecord",
                     "frame.prepareTlas",
                     "frame.recordTlas",
+                    "frame.waterCamera",
                     "frame.tracePrimary",
                     "frame.traceIndirect",
                     "frame.nrd",

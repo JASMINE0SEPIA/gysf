@@ -154,6 +154,9 @@ abstract class GenerateShaderRecords extends DefaultTask {
         }
         sb << ") {\n"
         sb << "    public static final int BYTE_SIZE = ${byteSize};\n"
+        fields.each { field ->
+            sb << "    public static final int ${upperSnake(field.name)}_OFFSET = ${field.binding.offset};\n"
+        }
         arrays.each { field ->
             sb << "    public static final int ${upperSnake(field.name)}_CAPACITY = ${field.type.elementCount};\n"
         }

@@ -640,7 +640,7 @@ tasks.register("verifyModJar") {
 					zip.getEntry("META-INF/LICENSE.md") == null) {
 				throw new GradleException("Missing compiled entrypoint or license")
 			}
-			["world.rgen.spv", "world.rchit.spv", "world.rahit.spv", "world.rmiss.spv", "world_water.rint.spv",
+			["world.rgen.spv", "world.rchit.spv", "world.rahit.spv", "world.rmiss.spv", "world_water.rint.spv", "world_water_camera.rgen.spv",
 			 "world_primary.rgen.spv", "shadow.rmiss.spv", "display.comp.spv", "svgf_reproject.comp.spv",
 			 "exposure_hist.comp.spv", "sdr_present.comp.spv", "hdr_ui_composite.comp.spv",
 			 "overlay_fullscreen_triangle.vert.spv", "block_outline.vert.spv"].each { shader ->

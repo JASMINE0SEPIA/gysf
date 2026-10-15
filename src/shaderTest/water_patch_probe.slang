@@ -4,6 +4,7 @@ import water_patch_cases;
 import water_primitive;
 import water_test_frame;
 import world_core;
+import math;
 RWStructuredBuffer<uint> result;
 RWStructuredBuffer<float4> rayResults;
 RWStructuredBuffer<float4> packedPrimitives;
@@ -115,6 +116,32 @@ float referencePatch(WaterPatch patch,float3 ro,float3 rd,float time,float footp
 
 uint runtimePrimitiveChecks(out uint count,out float maxNormalError) {
     uint failures=0;count=0;maxNormalError=0;
+    float4x4 savedProjection=worldPush.invViewProj;float3 savedCamera=worldPush.camOffset;
+    // Execute the actual shared camera helper with perspective/bob/rotation/zoom matrices. The
+    // independent expected centre is the translated camera-to-world origin, not a near-plane point.
+    for(int i=0;i<8;i++) {
+        float angle=float(i)*.37,c=cos(angle),s=sin(angle);
+        float3 translation=float3(float(i)*.17-.4,float(i)*-.08+.3,float(i)*.12-.2);
+        float4x4 cameraToWorld=float4x4(c,0,s,translation.x, 0,1,0,translation.y,
+                -s,0,c,translation.z, 0,0,0,1);
+        float4x4 inverseProjection=float4x4(.3+float(i)*.13,0,0,0, 0,.4+float(i)*.11,0,0,
+                0,0,0,-1, 0,0,19.9999,.0001);
+        worldPush.invViewProj=mul(cameraToWorld,inverseProjection);worldPush.camOffset=float3(13,-7,21);
+        float3 eye;bool valid=cameraProjectionEye(eye);
+        float4 nearH=mul(worldPush.invViewProj,float4(.31,-.42,1,1));
+        float4 farH=mul(worldPush.invViewProj,float4(.31,-.42,0,1));
+        count++;
+        if(!valid || length(eye-(translation+worldPush.camOffset))>1e-5
+                || dot(normalize(nearH.xyz/nearH.w+worldPush.camOffset-eye),
+                       normalize(farH.xyz/farH.w+worldPush.camOffset-eye))<.999999)failures++;
+    }
+    worldPush.invViewProj=float4x4(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1);
+    float3 orthoEye;count++;if(cameraProjectionEye(orthoEye)||any(orthoEye!=worldPush.camOffset))failures++;
+    worldPush.invViewProj=savedProjection;worldPush.camOffset=savedCamera;
+    float4 clips[7]={float4(0,0,0,1),float4(0,0,1,1),float4(0,0,2,1),float4(0,0,-.1,1),
+            float4(0,0,.25,1),float4(0,0,.5,0),float4(0,0,.5,-1)};
+    float depths[7]={0,1,1,0,.25,0,0};
+    for(int i=0;i<7;i++) {count++;if(abs(guideDeviceDepth(clips[i])-depths[i])>1e-7)failures++;}
     // Full-sphere normals cover both viewed sides, poles, axes and the octahedral seam.
     for(int i=0;i<=32;i++)for(int j=0;j<64;j++) {
         float y=-1.0+2.0*float(i)/32.0,angle=float(j)*6.28318530718/64.0;

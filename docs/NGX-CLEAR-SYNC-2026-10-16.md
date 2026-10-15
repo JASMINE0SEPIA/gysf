@@ -73,3 +73,8 @@ LOD live bytes at shutdown. The loaded shim SHA-256 was
 `51D1D46073D85297D664CFEBB68FB48540996CD0236AE3B4C8F05B52CE5EFCF7`.
 The combined water-camera/lifecycle qualification is recorded separately in
 [the finite-water runtime record](WATER-RUNTIME-2026-10-15.md).
+That combined qualification subsequently passed all three strict controls
+(five camera phases, finite-on moving/pressure lifecycle, finite-off lifecycle),
+with 52,420 RT frames and zero native LOD live bytes at each shutdown. The
+original NVIDIA feature DLL remains unchanged; the repair is in this shim and
+the proc callbacks supplied at NGX initialization.

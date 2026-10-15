@@ -239,6 +239,9 @@ void main() {
     float3 nearP = nearH.xyz / nearH.w;
     float3 farP = farH.xyz / farH.w;
     float3 origin = nearP + worldPush.camOffset;
+    // The finite-water medium probe classified the projection's optical centre. Start there too,
+    // so a surface between the eye and near plane cannot be skipped while retaining a water medium.
+    if((worldPush.waterCamera.x&2u)!=0u) cameraProjectionEye(origin);
     float3 dir = normalize(farP - nearP);
     float rayConeSpread = primaryRayConeSpread(jndc, size, dir);
     uint seed = (dispatchIndex.x * 1973u + dispatchIndex.y * 9277u + 26699u)

@@ -579,6 +579,7 @@ public final class RtComposite {
     private static final class PushSlot {
         final RtBuffer buffer;
         final RtGpuExecutor.TrackedGraphicsUse graphicsUse = new RtGpuExecutor.TrackedGraphicsUse();
+        boolean cameraProbeWritten;
 
         PushSlot(RtBuffer buffer) {
             this.buffer = buffer;
@@ -1001,9 +1002,12 @@ public final class RtComposite {
     private RtPipeline ensureWorld(RtContext ctx) {
         if (worldPipeline == null) {
             bindlessTextureCapacity = RtEntityTextures.maxTextures();
-            worldPipeline = RtPipeline.create(ctx, new String[]{
+            boolean finiteWater=dev.comfyfluffy.caustica.rt.terrain.RtWaterGeometry.runtimeEnabled();
+            String[] raygens=finiteWater ? new String[]{RtDeviceBringup.worldPrimaryRaygenShader(),
+                    RtDeviceBringup.worldRaygenShader(),"world_water_camera.rgen.spv"} : new String[]{
                             RtDeviceBringup.worldPrimaryRaygenShader(),
-                            RtDeviceBringup.worldRaygenShader()},
+                            RtDeviceBringup.worldRaygenShader()};
+            worldPipeline = RtPipeline.create(ctx, raygens,
                     new String[]{"world.rmiss.spv", "world_guide.rmiss.spv"},
                     "world.rchit.spv", "world.rahit.spv",
                     WorldPushConstantsData.BYTE_SIZE, true, GUIDE_COUNT, bindlessTextureCapacity, true,
@@ -1600,6 +1604,12 @@ public final class RtComposite {
             pushSlot = (pushSlot + 1) % PUSH_RING;
             PushSlot selectedPushSlot = pushRing[pushSlot];
             graphicsUseWaiter.await(selectedPushSlot.graphicsUse);
+            if(selectedPushSlot.cameraProbeWritten && RtWaterCameraProbe.validationEnabled()) {
+                selectedPushSlot.buffer.invalidate(WorldPushData.WATER_CAMERA_OFFSET,16);
+                RtWaterCameraProbe.observe(MemoryUtil.memByteBuffer(selectedPushSlot.buffer.mapped
+                        +WorldPushData.WATER_CAMERA_OFFSET,16).order(ByteOrder.nativeOrder()));
+            }
+            selectedPushSlot.cameraProbeWritten=false;
             selectedPushSlot.graphicsUse.mark(graphicsUse);
             RtBuffer pushBuf = selectedPushSlot.buffer;
             ByteBuffer push = MemoryUtil.memByteBuffer(pushBuf.mapped, WORLD_PUSH_SIZE);
@@ -1715,6 +1725,9 @@ public final class RtComposite {
                     sky.moonUv(),
                     waterParams,
                     waterAnchor,
+                    new Int4((flags&1)^(RtWaterCameraProbe.validationEnabled()
+                            && Boolean.getBoolean("gysf.rt.testInvertCameraHint") ? 1 : 0),
+                            0,Float.floatToRawIntBits(-1f),Float.floatToRawIntBits(-1f)),
                     waterWaveDomains(terrain.blockX, terrain.blockZ, waveFrame.baseSeconds()),
                     mvCurProjView,
                     breaking.length,
@@ -1822,6 +1835,14 @@ public final class RtComposite {
                     // trying to inspect. The tracer sees 0 (normal shading) for those.
                     (int) frameCounter, svgfDebugView ? 0 : debugView,
                     terrain.lightGeneration(), restirMode()).write(pushConstants);
+            if(dev.comfyfluffy.caustica.rt.terrain.RtWaterGeometry.runtimeEnabled()) {
+                try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx,cmd,"water camera medium");
+                     RtFrameStats.Scope ignoredStats=RtFrameStats.FRAME.stage("frame.waterCamera")) {
+                    active.trace(cmd,1,1,pushConstants,2);
+                }
+                RtWaterCameraProbe.barrier(cmd,stack);
+                selectedPushSlot.cameraProbeWritten=true;
+            }
             try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "world primary trace");
                  RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.tracePrimary")) {
                 active.trace(cmd, renderW, renderH, pushConstants, 0);

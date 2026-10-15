@@ -5,6 +5,13 @@ lower performance with DLSS enabled. These remain separate acceptance targets.
 The isolated scene is not a copy of the player's world, and none of these checks
 changes the installed PCL mod pair, player settings or saves.
 
+**2026-10-16 validation audit:** the earlier VUID-only log filter could miss
+prefix-free NGX `WRITE_AFTER_WRITE` reports. Historical RR-enabled statements
+below claiming no synchronization hazards are provisional until their original
+logs pass the new strict checker; counter/timing records are unchanged. The
+local report, scoped repair and newly qualified controls are documented in
+[NGX clear synchronization](NGX-CLEAR-SYNC-2026-10-16.md).
+
 ## Evidence and changes
 
 The player log recorded 7,497 MiB process device-heap usage against a 6,999 MiB

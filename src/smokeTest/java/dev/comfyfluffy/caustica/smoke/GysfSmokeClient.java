@@ -54,9 +54,14 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private java.util.concurrent.CompletableFuture<?> fluidTopologyEditReady;
     private java.util.concurrent.CompletableFuture<?> fluidTopologyRestoreReady;
     private final WaterSequenceCapture waterSequence=new WaterSequenceCapture();
+    private final WaterCameraCapture waterCamera=new WaterCameraCapture();
     @Override public void onInitializeClient() {
         if(CLEAN_WATER && (FLUID_TOPOLOGY || FLUID_TOPOLOGY_EDITS || TEXTURE_FIXTURE))
             throw new IllegalStateException("Clean-water world cannot contain topology or material fixtures");
+        if(WaterCameraCapture.ENABLED && (!CLEAN_WATER || !WATER_COMPARE || WATER_MATRIX || WaterSequenceCapture.ENABLED
+                || !dev.comfyfluffy.caustica.rt.terrain.RtWaterGeometry.runtimeEnabled()
+                || !dev.comfyfluffy.caustica.rt.RtWaterCameraProbe.validationEnabled()))
+            throw new IllegalStateException("Water camera checks need finite water, GPU readback and clean comparison mode");
         if(WaterSequenceCapture.ENABLED && (!CLEAN_WATER || !WATER_COMPARE || WATER_MATRIX || requestedWaveSpeed()<=0))
             throw new IllegalStateException("Animated water sequence needs clean comparison mode and positive speed");
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);
@@ -256,12 +261,12 @@ public final class GysfSmokeClient implements ClientModInitializer {
                 image->{try {image.writeToFile(Path.of("screenshots","gysf-no-textured-control.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
         if (VISUAL_CONTROL && worldTicks==980) System.clearProperty("gysf.voxy.hideTextured");
         if (worldTicks==1000 && !WATER_COMPARE && !(CLEAN_WATER && WATER_MATRIX)) reload=client.reloadResourcePacks();
-        if (WATER_FIXTURE && worldTicks==1100) {
+        if (WATER_FIXTURE && !WaterCameraCapture.ENABLED && worldTicks==1100) {
             client.player.connection.sendCommand("tp @s 64 110 32 0 -2");
             client.options.fov().set(70);
             if(WATER_MATRIX) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(0f);
         }
-        if (WATER_FIXTURE && worldTicks==1250) {
+        if (WATER_FIXTURE && !WaterCameraCapture.ENABLED && worldTicks==1250) {
             if(!client.player.isUnderWater()) throw new IllegalStateException("Underwater camera was not observed");
             Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                     image->{try {image.writeToFile(Path.of("screenshots","gysf-water-underwater.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
@@ -282,7 +287,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
             if(worldTicks==1680) waterCapture(client,"raw-two");
             if(worldTicks==1685) { CausticaConfig.Rt.Composite.DENOISER.set(true); CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(requestedWaveSpeed()); }
         }
-        if (WATER_FIXTURE && worldTicks==(WaterSequenceCapture.ENABLED?1570:CLEAN_WATER && WATER_MATRIX?1710:FLUID_TOPOLOGY_EDITS?1540:1280)) client.player.connection.sendCommand("forceload remove 32 0 96 160");
+        if (WATER_FIXTURE && worldTicks==(WaterCameraCapture.ENABLED?1960:WaterSequenceCapture.ENABLED?1570:CLEAN_WATER && WATER_MATRIX?1710:FLUID_TOPOLOGY_EDITS?1540:1280)) client.player.connection.sendCommand("forceload remove 32 0 96 160");
         if(FLUID_TOPOLOGY && worldTicks==(FLUID_TOPOLOGY_EDITS?1540:1280)) client.getSingleplayerServer().submit(()->client.getSingleplayerServer().tickRateManager().setFrozen(false));
         if (STATIC_WATER && !WATER_MATRIX && worldTicks==1280) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(requestedWaveSpeed());
         if (!WATER_MATRIX && !WATER_COMPARE && worldTicks==1350) client.player.connection.sendCommand("execute in minecraft:the_nether run tp @s 0 90 0");
@@ -299,8 +304,10 @@ public final class GysfSmokeClient implements ClientModInitializer {
         if (MOTION && worldTicks==2800) Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),
                 image->{try {image.writeToFile(Path.of("screenshots","gysf-motion-return.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
         waterSequence.sample(client,worldTicks);
-        if (worldTicks==(WATER_COMPARE?(FLUID_TOPOLOGY_EDITS?1550:WaterSequenceCapture.ENABLED?1580:1290):WATER_MATRIX?1720:VISUAL_ONLY?990:MOTION?2900:2200)) {
+        waterCamera.sample(client,worldTicks);
+        if (worldTicks==(WATER_COMPARE?(WaterCameraCapture.ENABLED?1970:FLUID_TOPOLOGY_EDITS?1550:WaterSequenceCapture.ENABLED?1580:1290):WATER_MATRIX?1720:VISUAL_ONLY?990:MOTION?2900:2200)) {
             waterSequence.verify();
+            waterCamera.verify();
             if(!VISUAL_ONLY && !WATER_COMPARE && !(CLEAN_WATER && WATER_MATRIX)) {
                 if (reload==null || !reload.isDone()) throw new IllegalStateException("Resource reload incomplete");
                 reload.join();

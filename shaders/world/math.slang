@@ -4,6 +4,23 @@
 import world_common;
 import world_core;
 
+// All perspective rays meet at inverse(VP)*(0,0,1,0). This includes translations/rotations baked
+// into Minecraft's projection (view bob), unlike assuming that camOffset is the optical centre.
+// Orthographic projections have a centre at infinity and retain the existing near-plane origins.
+public bool cameraProjectionEye(out float3 eye) {
+    float4 centre=mul(worldPush.invViewProj,float4(0,0,1,0));
+    eye=worldPush.camOffset;
+    if(abs(centre.w)<1e-8)return false;
+    eye+=centre.xyz/centre.w;
+    return all(isfinite(eye));
+}
+
+// True eye origins can see an interface before the raster near plane. RR still consumes device
+// depth in [0,1]; keep physical viewZ separately rather than exporting an out-of-range z/w.
+public float guideDeviceDepth(float4 clip) {
+    return clip.w>0.0 ? saturate(clip.z/clip.w) : 0.0;
+}
+
 public float luminance(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
 
 // GGX normal distribution.
