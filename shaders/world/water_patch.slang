@@ -117,7 +117,9 @@ public float solveWaterPatchInterval(WaterPatch patch,float3 ro,float3 rd,float 
         float root=sqrt(dg*dg+2.0*curvature*g);
         float step=dg<0.0?2.0*g/(root-dg):(root+dg)/curvature;
         float next=min(t+max(step,0.00001),hi);
-        if(next==t){exhausted=true;return -1.0;}
+        // Vulkan ray parameters are nonnegative. A positive step can round back to t
+        // on a long ray; visit its next representable value to bracket the crossing.
+        if(next==t)next=min(asfloat(asuint(t)+1u),hi);
         last=t;t=next;
     }
     exhausted=true;return -1.0;

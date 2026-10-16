@@ -155,5 +155,25 @@ void fieldProbe(uint3 id:SV_DispatchThreadID) {
             if(excluded>=0||outOfWork)failures++;
         }
     }
+    if(c>=4064) {
+        // Known non-flat water has an independent analytic solution for a vertical ray.
+        // Include parameters whose ULP exceeds the solver's ordinary minimum step.
+        uint r=c-4064;
+        float side=(r&1)==0?1.0:-1.0,altitude=64.0*exp2(float(r%8)),time=float(r%13)*.317;
+        float3 origin=float3(24.75,side*altitude,24.25),direction=float3(0,-side,0);
+        float height=waterWaveHeight(origin.xz,time,0),expected=(height-origin.y)/direction.y;
+        if(expectedWeight(int2(24))!=1.0)failures++;
+        WaterPatch p;p.point=0;p.normal=float3(0,1,0);p.minimum=float2(24);p.extent=1;p.shore=1;p.half=0;
+        uint n;bool exhausted;
+        float hit=intersectCanonicalWaterPatch(p,175,origin,direction,time,0,0,altitude+4,n,exhausted);
+        float ulp=asfloat(asuint(expected)+1u)-expected;
+        if(hit<0||exhausted||abs(hit-expected)>2*ulp)failures++;
+        work+=n;if(hit>=0)error=max(error,abs(hit-expected));
+        // Advancing one ULP must respect both caller limits, including a clipped last step.
+        float excluded=intersectCanonicalWaterPatch(p,175,origin,direction,time,0,expected+8*ulp,altitude+4,n,exhausted);
+        if(excluded>=0||exhausted)failures++;
+        excluded=intersectCanonicalWaterPatch(p,175,origin,direction,time,0,0,expected-8*ulp,n,exhausted);
+        if(excluded>=0||exhausted)failures++;
+    }
     fieldResults[c]=float4(float(failures),error,c<3840?gradientError:float(work),c<3840?0.0:1.0);
 }
