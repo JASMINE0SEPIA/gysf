@@ -96,6 +96,10 @@ try {
         waterHitShaderBaselineSha256=if($WaterHitShaderBaseline){(Get-FileHash -LiteralPath $taskHitBaseline).Hash.ToLowerInvariant()}else{''};
         settleSeconds=$SettleSeconds;measureSeconds=$MeasureSeconds
     } | ConvertTo-Json | Set-Content -LiteralPath "run-smoke/performance-smoke/$Label/run.json" -Encoding utf8
+    if($NearMemoryPressure) {
+        & (Join-Path $PSScriptRoot 'Assert-VulkanSmokeLog.ps1') -Path "$Label.log" -RequireNearPressure `
+            -RequireWaterBoundsCache:($FiniteWater -and !$CompareWaterBounds -and !$DisableWaterBoundsCache -and $WaterBoundsCacheMiB -gt 0)
+    }
     if($WaterShaderBaseline -and !(Select-String -LiteralPath "$Label.log" -Pattern 'GYSF_SHADER_COMPARE: complete switches=\d+ liveAlternates=0' -Quiet)) {
         throw 'Missing alternate-pipeline lifetime qualification'
     }

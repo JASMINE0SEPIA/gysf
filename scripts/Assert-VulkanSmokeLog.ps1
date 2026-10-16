@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync,[switch]$RequireWaterField,[switch]$RequireWaterGuides,[switch]$RequireGpuTimings,[switch]$RequireWaterBoundsCache,
+param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync,[switch]$RequireWaterField,[switch]$RequireWaterGuides,[switch]$RequireGpuTimings,[switch]$RequireWaterBoundsCache,[switch]$RequireNearPressure,
       [ValidateRange(1,64)][int]$GuideCaptureCount=4)
 $ErrorActionPreference='Stop'
 $content=Get-Content -LiteralPath $Path -Raw
@@ -8,7 +8,15 @@ $reports=Select-String -LiteralPath $Path -Pattern $validation
 if($reports) {
     throw "Vulkan validation reports in ${Path}: $($reports.Count). First: $($reports[0].Line)"
 }
-if($content -notmatch 'GYSF_(SMOKE|PERF): PASS') {throw "Missing smoke/performance PASS marker in $Path"}
+if($RequireNearPressure) {
+    $pressure=[regex]::Matches($content,'GYSF_NEAR_PRESSURE: PASS initial=(\d+) minimum=(\d+) recovered=(\d+) instances=(\d+) -> (\d+) -> (\d+) retirementObserved=true ownershipChecks=(\d+)')
+    if($pressure.Count -ne 1){throw "Missing unique near-pressure PASS marker in $Path"}
+    $p=$pressure[0].Groups
+    if([int]$p[1].Value -le 4 -or [int]$p[2].Value -ge [int]$p[1].Value -or [int]$p[3].Value -ne [int]$p[1].Value -or
+       [int]$p[5].Value -ge [int]$p[4].Value -or [int]$p[6].Value -le [int]$p[5].Value -or [int]$p[7].Value -lt 30) {
+        throw "Near-pressure contraction/recovery/ownership qualification failed in $Path"
+    }
+} elseif($content -notmatch 'GYSF_(SMOKE|PERF): PASS') {throw "Missing smoke/performance PASS marker in $Path"}
 $shutdowns=[regex]::Matches($content,'RT LOD native shutdown: live=(\d+) bytes')
 if($shutdowns.Count -eq 0 -or ($shutdowns | Where-Object { [long]$_.Groups[1].Value -ne 0 })) {
     throw "Missing or nonzero native LOD shutdown in $Path"

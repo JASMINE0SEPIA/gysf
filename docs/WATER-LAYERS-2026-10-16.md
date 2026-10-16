@@ -142,6 +142,42 @@ The bundled water-intersection shader is `519a540f615fff08ddc2db4a7781706b072351
 the bundled closest-hit shader is `39cc3a4c7f7e27c6d18750aca60321d7ee53146956c8c209e19f5541ef8cc3a8`.
 Provider remains unchanged at `d4097ba`. Source hashes and evidence are retained beside the JAR.
 
+## Driver-headroom pressure with the water cache
+
+`water-layer-pressure` completes in the isolated game at 854x480, near radius 32, OMM off,
+finite water and its 64 MiB cache enabled, with Vulkan synchronization validation and NGX clear
+tracing. After a 180-second warmup it ramps actual unused device buffers to 1,792 MiB and releases
+them 45 seconds after pressure begins. The near window contracts 32 -> 24 and returns through
+26/28/30 to 32 after release. Exact instances change 25,350 -> 17,551 -> 25,517. Completion
+requires at least sixty seconds after release and ten seconds without near/LOD builds at the
+recovered radius; 289 published-ownership checks pass. The 1,738-section LOD selection remains
+resident through the pressure/recovery record; this uses the wide near window, unlike the
+2,006-section selection of the radius-16 cadence run.
+
+The cache reaches its 67,108,864-byte limit and records 10,294 successful publications
+throughout the session. Water-field, cache, cache input/source/pending and native terrain exit
+counts are all zero; native LOD peak is 669,087,472 bytes with no allocation deferrals. The log
+checker accepts zero Vulkan/synchronization errors and confirms live RR/NGX clear synchronization.
+This qualifies the exercised pressure/recovery lifecycle, not moving-camera optics or frame rate.
+
+The first post-run checker invocation rejected the log because pressure-only mode emits
+`GYSF_NEAR_PRESSURE: PASS`, without a generic smoke/performance PASS. The checker now requires
+an explicit `-RequireNearPressure` option, a unique complete contraction/recovery/retirement and
+ownership record, and all existing error/shutdown gates. Five mutated logs (missing completion,
+unrecovered radius, validation error, live terrain and retained cache input) are rejected; the
+original lifecycle log still passes. `Test-Performance.ps1 -NearMemoryPressure` invokes this
+gate automatically. The game binary was unchanged; no second pressure run was needed.
+
+```powershell
+.\scripts\Test-Performance.ps1 -RenderDistance 32 -Width 854 -Height 480 -InitialSeconds 180 `
+    -Presets '0' -NearMemoryPressure -PressureOnly -ValidateVulkan -FiniteWater -Label fresh-water-pressure
+.\scripts\Assert-VulkanSmokeLog.ps1 -Path fresh-water-pressure.log -RequireNearPressure `
+    -RequireWaterBoundsCache -RequireNgxClearSync
+```
+
+The explicit NGX check additionally needs `NGXSHIM_SYNC_TRACE=1` during the game run; the
+recorded run also set `VK_KHRONOS_VALIDATION_VALIDATE_SYNC=true`.
+
 ## Repeat and remaining acceptance
 
 After `gradlew test` has exported the canonical field images, with Java 25/Vulkan SDK staged and
@@ -159,7 +195,7 @@ are written before a gate can fail. Raw tables, field images and logs live local
 `artifacts/2026-10-16/water-layer-repro/` (old reproduction) and
 `artifacts/2026-10-16/water-layer-fix/` (repair), ignored by Git.
 
-Actual driver-headroom pressure with the new water cache, and mixed/near guide comparisons on
-varying-height and covered water, remain necessary before claiming the full near/far or
+Mixed/near guide comparisons on varying-height and covered water, and moving-camera natural-world
+checks, remain necessary before claiming the full near/far or
 natural-shoreline requirement complete. Coincident rest-edge displacement continuity
 also does not prove that the underlying coarse and near rest meshes already coincide everywhere.
