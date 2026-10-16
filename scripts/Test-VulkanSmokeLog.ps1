@@ -22,14 +22,18 @@ $cases=@(
     @{Name='guides-incomplete';Text="$clean`nGuide readback shutdown: live=0 bytes, peak=64 bytes, captures=3";Reject=$true;Guides=$true},
     @{Name='guides-qualified';Text=$guides;Reject=$false;Guides=$true},
     @{Name='optics-wrong-count';Text=$optics;Reject=$true;Guides=$true},
-    @{Name='optics-qualified';Text=$optics;Reject=$false;Guides=$true;GuideCount=8}
+    @{Name='optics-qualified';Text=$optics;Reject=$false;Guides=$true;GuideCount=8},
+    @{Name='timing-required';Text=$clean;Reject=$true;Timings=$true},
+    @{Name='timing-live-pool';Text="$clean`nGYSF_GPU_TIMINGS: complete samples=5 skipped=0 livePools=1";Reject=$true},
+    @{Name='timing-uninitialized';Text="$clean`nGYSF_GPU_TIMINGS: complete samples=5 skipped=0 livePools=0";Reject=$true;Timings=$true},
+    @{Name='timing-qualified';Text="$clean`nGYSF_GPU_TIMINGS: start timestampBits=64`nGYSF_GPU_TIMINGS: complete samples=5 skipped=0 livePools=0";Reject=$false;Timings=$true}
 )
 foreach($case in $cases) {
     $casePath=Join-Path $testRoot ($case.Name+'.log')
     Set-Content -LiteralPath $casePath -Value $case.Text -Encoding utf8
     $rejected=$false
     $taskGuideCount=if($case.GuideCount){$case.GuideCount}else{4}
-    try { & (Join-Path $PSScriptRoot 'Assert-VulkanSmokeLog.ps1') -Path $casePath -RequireWaterField:([bool]$case.Field) -RequireWaterGuides:([bool]$case.Guides) -GuideCaptureCount $taskGuideCount | Out-Null }
+    try { & (Join-Path $PSScriptRoot 'Assert-VulkanSmokeLog.ps1') -Path $casePath -RequireWaterField:([bool]$case.Field) -RequireWaterGuides:([bool]$case.Guides) -GuideCaptureCount $taskGuideCount -RequireGpuTimings:([bool]$case.Timings) | Out-Null }
     catch {$rejected=$true}
     if($rejected -ne $case.Reject) {throw "Smoke log checker regression: $($case.Name)"}
 }

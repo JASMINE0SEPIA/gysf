@@ -523,6 +523,11 @@ public final class RtComposite {
         return frameCounter;
     }
 
+    public record RenderInfo(long frame,int renderWidth,int renderHeight,int displayWidth,int displayHeight,String filter) {}
+    private static final boolean CAPTURE_RENDER_INFO=Boolean.getBoolean("gysf.smoke.performance");
+    private RenderInfo renderInfo;
+    public RenderInfo renderInfo(){return renderInfo;}
+
     private RtPipeline worldPipeline;
     // Set at the HEAD of Minecraft.reloadResourcePacks() (mixin): a resource reload recreates the block
     // atlas + entity textures. We tear down the world pipeline there (drops all descriptor references) and
@@ -1551,6 +1556,7 @@ public final class RtComposite {
         int debugView = debugView();
         RtTerrain terrain = RtTerrain.currentOrNull();
         try (MemoryStack stack = MemoryStack.stackPush(); RtDebugLabels.Scope frameLabel = RtDebugLabels.scope(ctx, cmd, "composite frame")) {
+            RtGpuTimings.INSTANCE.begin(ctx,cmd,stack,frameCounter,renderW,renderH,displayW,displayH,graphicsUseWaiter);
             // The active upscaler drives the frame: trace + jitter at render res, then DLSS-RR
             // (denoise+upscale) or FSR 3 (upscale only) brings it to display res. They occupy one
             // slot — RR wins if both are somehow on — and jitter is suppressed for the no-upscaler
@@ -1827,6 +1833,7 @@ public final class RtComposite {
                 RtAccel.recordTlasBuild(ctx, cmd, frameTlas);
             }
             VulkanCommandEncoder.memoryBarrier(cmd, stack); // TLAS build visible to the trace
+            RtGpuTimings.INSTANCE.mark(cmd,1);
 
             // Push the BDA ring slot's address plus the small hot subset used directly by the shaders.
             // Every 64-bit device address the trace needs lives here, not behind worldPushAddr: the
@@ -1854,16 +1861,19 @@ public final class RtComposite {
                 RtWaterCameraProbe.barrier(cmd,stack);
                 selectedPushSlot.cameraProbeWritten=true;
             }
+            RtGpuTimings.INSTANCE.mark(cmd,2);
             try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "world primary trace");
                  RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.tracePrimary")) {
                 active.trace(cmd, renderW, renderH, pushConstants, 0);
             }
             VulkanCommandEncoder.memoryBarrier(cmd, stack); // continuation/guide writes visible to pass B
+            RtGpuTimings.INSTANCE.mark(cmd,3);
             try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "world indirect trace");
                  RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.traceIndirect")) {
                 active.trace(cmd, renderW, renderH, pushConstants, 1);
             }
             VulkanCommandEncoder.memoryBarrier(cmd, stack); // RT writes visible to the temporal/upscale reads
+            RtGpuTimings.INSTANCE.mark(cmd,4);
             if(guideCaptureAddress!=0) {
                 RtGuideCapture.INSTANCE.record(ctx,cmd,stack,pushBuf,WorldPushData.BYTE_SIZE,
                         java.util.List.of(new RtGuideCapture.Image("normal","rgba16f",8,gNormal),
@@ -2143,6 +2153,10 @@ public final class RtComposite {
                 }
             }
             VulkanCommandEncoder.memoryBarrier(cmd, stack); // rrOutput visible to exposure histogram
+            String resolvedFilter=rrPath&&rrDone?"dlss-rr":nrdDone?"nrd":svgfRan?"svgf":"none";
+            RtGpuTimings.INSTANCE.filter(resolvedFilter);
+            RtGpuTimings.INSTANCE.mark(cmd,5);
+            if(CAPTURE_RENDER_INFO)renderInfo=new RenderInfo(frameCounter,renderW,renderH,displayW,displayH,resolvedFilter);
             if(guideCaptureAddress!=0)RtGuideCapture.INSTANCE.recordResolved(ctx,cmd,stack,rrOutput,
                     rrPath&&rrDone?"dlss-rr":nrdDone?"nrd":svgfRan?"svgf":"none");
 
@@ -2158,6 +2172,7 @@ public final class RtComposite {
                 exposure.record(ctx, cmd, stack, rrOutput);
             }
             VulkanCommandEncoder.memoryBarrier(cmd, stack); // exposure image visible to the display mapper
+            RtGpuTimings.INSTANCE.mark(cmd,6);
 
             try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "map RT to display");
                  RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.displayMap")) {
@@ -2171,6 +2186,7 @@ public final class RtComposite {
             }
             hdrWrittenThisFrame = CausticaConfig.Rt.Hdr.enabled();
             VulkanCommandEncoder.memoryBarrier(cmd, stack);
+            RtGpuTimings.INSTANCE.mark(cmd,7);
 
             try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "copy composite to main target");
                  RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.copyOutput")) {
@@ -2178,6 +2194,7 @@ public final class RtComposite {
                         dstImage, VK10.VK_IMAGE_LAYOUT_GENERAL, copyRegion(stack, displayW, displayH));
             }
             VulkanCommandEncoder.memoryBarrier(cmd, stack);
+            RtGpuTimings.INSTANCE.mark(cmd,8);
         }
         if (VK10.vkEndCommandBuffer(cmd) != VK10.VK_SUCCESS) {
             throw new IllegalStateException("vkEndCommandBuffer(rt composite) failed");
@@ -2192,6 +2209,7 @@ public final class RtComposite {
         // every owner in this frame's manifest is protected through the final overlay consumer.
         RtEntities.INSTANCE.markGraphicsUse(frameEntities, graphicsUse);
         RtGuideCapture.INSTANCE.submitted(graphicsUse);
+        RtGpuTimings.INSTANCE.submitted(graphicsUse);
     }
 
     /**
@@ -2798,6 +2816,7 @@ public final class RtComposite {
         tlasRing.destroy();
         waterField.destroy();
         RtGuideCapture.INSTANCE.destroy();
+        RtGpuTimings.INSTANCE.destroy();
         sharc.destroy(RtContext.currentOrNull());
         // Unconditional: RtDlssRr.enabled() reflects the CURRENT toggles, and the denoiser toggle can
         // have been turned off after a feature was already created. destroy() is a no-op when nothing

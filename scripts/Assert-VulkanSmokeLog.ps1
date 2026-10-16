@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync,[switch]$RequireWaterField,[switch]$RequireWaterGuides,
+param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync,[switch]$RequireWaterField,[switch]$RequireWaterGuides,[switch]$RequireGpuTimings,
       [ValidateRange(1,64)][int]$GuideCaptureCount=4)
 $ErrorActionPreference='Stop'
 $content=Get-Content -LiteralPath $Path -Raw
@@ -27,5 +27,11 @@ if($RequireWaterGuides -and ($guideShutdowns.Count -ne 1 -or [long]$guideShutdow
         $content -notmatch "GYSF_WATER_GUIDES: PASS phases=$GuideCaptureCount locked=true jitter=0 staticWaves=true" -or
         [regex]::Matches($content,'GYSF_GUIDE_CAPTURE: saved=').Count -ne $GuideCaptureCount)) {
     throw "Missing $GuideCaptureCount-phase GPU guide readback/shutdown qualification in $Path"
+}
+$timingShutdowns=[regex]::Matches($content,'GYSF_GPU_TIMINGS: complete samples=(\d+) skipped=\d+ livePools=(\d+)')
+if($timingShutdowns | Where-Object {[long]$_.Groups[2].Value -ne 0}) {throw "Nonzero GPU timing pools in $Path"}
+if($RequireGpuTimings -and ($timingShutdowns.Count -ne 1 -or [long]$timingShutdowns[0].Groups[1].Value -eq 0 -or
+        [regex]::Matches($content,'GYSF_GPU_TIMINGS: start timestampBits=').Count -ne 1)) {
+    throw "Missing GPU timing sample/lifetime qualification in $Path"
 }
 Write-Output "Vulkan smoke log accepted: $Path"

@@ -543,6 +543,12 @@ public final class RtGpuExecutor {
             this.completedValue = completedValue;
         }
 
+        /** Non-blocking check against this waiter's completed graphics snapshot. */
+        public boolean completed(TrackedGraphicsUse trackedUse) {
+            assertRenderThread();
+            return trackedUse.value <= completedValue;
+        }
+
         /** Return true only when this call had to issue a host wait. */
         public boolean await(TrackedGraphicsUse trackedUse) {
             assertRenderThread();

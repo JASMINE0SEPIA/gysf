@@ -12,6 +12,8 @@ p.add_argument("csv", type=Path)
 p.add_argument("--output", type=Path)
 p.add_argument("--exclude-phases", default="", help="Explicit exclusions, recorded in output; never silently discard drift")
 p.add_argument("--diagnostic", action="store_true", help="Report missing/changing geometry versions without accepting a controlled comparison")
+p.add_argument("--gpu", type=Path, help="Optional sampled GPU timestamps joined by exact RT frame serial")
+p.add_argument("--validation", action="store_true", help="Explicit validation-layer diagnostic; never qualify production cadence")
 a = p.parse_args()
 groups = defaultdict(list)
 with a.csv.open(newline="", encoding="utf-8-sig") as f:
@@ -27,7 +29,23 @@ for key in ("cameraX", "cameraY", "cameraZ", "yaw", "pitch"):
     vals = [float(r[key]) for rows in groups.values() for r in rows]
     if not all(map(math.isfinite, vals)) or max(vals)-min(vals) > .001:
         raise SystemExit(f"INVALID: camera {key} differs between model phases")
-report = {"kind": "full-frame wall cadence, no validation layers expected", "phases": []}
+report = {"kind": "full-frame wall cadence; geometry acceptance is separate from instrumentation", "phases": []}
+metadata_file = a.csv.parent / "run.json"
+metadata = json.loads(metadata_file.read_text(encoding="utf-8-sig")) if metadata_file.exists() else None
+report["runMetadata"] = metadata
+if metadata is not None:
+    expected = set(range(len(metadata["presets"].split(","))))
+    if set(groups) != expected:
+        raise SystemExit("INVALID: measured phases do not match the requested run")
+gpu = {}
+if a.gpu:
+    with a.gpu.open(newline="", encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            serial = int(row["rtFrame"])
+            if serial in gpu:
+                raise SystemExit("INVALID: duplicate GPU frame serial")
+            gpu[serial] = row
+report["gpuInstrumented"] = bool(a.gpu)
 excluded = {int(v) for v in a.exclude_phases.split(",") if v}
 report["excludedPhases"] = sorted(excluded)
 for phase, rows in sorted(groups.items()):
@@ -51,6 +69,44 @@ for phase, rows in sorted(groups.items()):
             "meanMs": statistics.mean(intervals), "medianMs": statistics.median(intervals),
             "p95Ms": intervals[int(len(rows)*.95)], "p99Ms": intervals[int(len(rows)*.99)],
             "fps": 1000 / statistics.mean(intervals)}
+    render_keys = ("quality", "renderWidth", "renderHeight", "displayWidth", "displayHeight", "filter", "spp", "bounces", "finiteWater", "omm", "nearPending", "lodPending")
+    item["renderEvidence"] = all(k in rows[0] for k in render_keys)
+    if item["renderEvidence"]:
+        for key in render_keys:
+            if len({r[key] for r in rows}) != 1:
+                raise SystemExit(f"INVALID: phase {phase} changed {key}")
+            item[key] = rows[0][key]
+        if item["filter"] != ("dlss-rr" if rows[0]["rr"] == "true" else "svgf"):
+            raise SystemExit("INVALID: unexpected actual filter")
+        if item["nearPending"] != "false" or item["lodPending"] != "false":
+            raise SystemExit("INVALID: geometry work during measurement")
+        for key in ("quality", "renderWidth", "renderHeight", "displayWidth", "displayHeight", "spp", "bounces"):
+            item[key] = int(item[key])
+        if min(item[k] for k in ("renderWidth", "renderHeight", "displayWidth", "displayHeight", "spp", "bounces")) <= 0:
+            raise SystemExit("INVALID: non-positive rendering dimension or trace setting")
+        if item["filter"] == "svgf" or item["quality"] == 5:
+            if (item["renderWidth"], item["renderHeight"]) != (item["displayWidth"], item["displayHeight"]):
+                raise SystemExit("INVALID: expected native rendering dimensions")
+    if gpu:
+        paired = []
+        for row in rows:
+            timing = gpu.get(int(row["rtFrame"]))
+            if timing is None:
+                continue
+            for key in ("preset", "quality", "renderWidth", "renderHeight", "displayWidth", "displayHeight", "filter"):
+                if key != "preset" or rows[0]["rr"] == "true":
+                    if timing[key] != row[key]:
+                        raise SystemExit(f"INVALID: GPU frame {row['rtFrame']} disagrees on {key}")
+            paired.append(timing)
+        if len(paired) < 8:
+            raise SystemExit(f"INVALID: too few exact GPU timing pairs in phase {phase}")
+        stages = ("prepareMs", "waterCameraMs", "primaryMs", "indirectMs", "reconstructMs", "exposureMs", "displayMs", "copyMs")
+        for timing in paired:
+            vals = [float(timing[k]) for k in (*stages, "totalGpuMs")]
+            if not all(math.isfinite(v) and v >= 0 for v in vals) or abs(sum(vals[:-1])-vals[-1]) > .00002:
+                raise SystemExit("INVALID: GPU duration or interval sum")
+        item["gpuSamples"] = len(paired)
+        item["gpuMeanMs"] = {k: statistics.mean(float(t[k]) for t in paired) for k in (*stages, "totalGpuMs")}
     for key in ("nearInstances", "lodSections", "processBytes", "budgetBytes"):
         vals = [int(r[key]) for r in rows]
         item[key] = [min(vals), max(vals)]
@@ -63,6 +119,12 @@ for phase, rows in sorted(groups.items()):
             vals = [int(r[key]) for r in rows]
             item[key] = [min(vals), max(vals)]
         item["versionsStable"] = all(item[k][0] == item[k][1] for k in version_keys)
+    if "waterUploads" in rows[0]:
+        for key in ("waterUploads", "waterKnownNodes", "waterPending"):
+            vals = [int(r[key]) for r in rows]
+            if min(vals) != max(vals):
+                raise SystemExit(f"INVALID: water field {key} changed during phase {phase}")
+            item[key] = vals[0]
     item["excluded"] = phase in excluded
     report["phases"].append(item)
 report["geometryStableAcrossAllPhases"] = all(
@@ -75,6 +137,17 @@ report["selectedSceneVersionsStable"] = bool(included) and all(item.get("version
 if report["selectedSceneVersionsStable"]:
     report["selectedSceneVersionsStable"] = all(len({tuple(item[k]) for item in included}) == 1 for k in version_keys)
 report["comparisonAccepted"] = report["selectedGeometryStable"] and report["selectedSceneVersionsStable"]
+if included and all(item["renderEvidence"] for item in included):
+    fixed_render = ("displayWidth", "displayHeight", "spp", "bounces", "finiteWater", "omm")
+    report["renderSettingsStable"] = all(len({item[k] for item in included}) == 1 for k in fixed_render)
+    report["comparisonAccepted"] &= report["renderSettingsStable"]
+if included and all("waterUploads" in item for item in included):
+    report["waterFieldStable"] = all(len({item[k] for item in included}) == 1 for k in ("waterUploads", "waterKnownNodes", "waterPending"))
+    report["comparisonAccepted"] &= report["waterFieldStable"]
+report["validationDiagnostic"] = a.validation or bool(metadata and metadata.get("validation"))
+report["cadenceQualified"] = bool(report["comparisonAccepted"] and all(item["renderEvidence"] for item in included)
+    and metadata is not None and not report["validationDiagnostic"]
+    and not a.gpu and not metadata.get("gpuTimings") and not metadata.get("cpuStats"))
 text = json.dumps(report, indent=2)
 if a.output:
     a.output.write_text(text + "\n", encoding="utf-8")
