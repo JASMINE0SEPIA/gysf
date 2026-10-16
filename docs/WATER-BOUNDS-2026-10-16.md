@@ -1,5 +1,9 @@
 # Water bounds: matched-scene diagnosis
 
+The subsequent bounded asynchronous runtime implementation and its separate acceptance evidence
+are recorded in [WATER-CACHE-2026-10-16.md](WATER-CACHE-2026-10-16.md). This document describes the
+earlier shadow-build diagnosis; its unchanged-JAR statement applies to that checkpoint.
+
 The `460268f` renderer always expands free water tops by 2.2 blocks, covering the maximum
 wave-height slider of four. At strength one, the authored height spectrum has an analytic upper
 bound about 0.507327742 blocks: each positive component is at most `Q/k`, multiplied by authored

@@ -71,6 +71,9 @@ public final class RtContext {
     private final RtLodMemory lodMemory = new RtLodMemory();
     private final ThreadLocal<Integer> lodAllocationDepth = ThreadLocal.withInitial(() -> 0);
     private final ThreadLocal<Boolean> lodQuotaEnforced = ThreadLocal.withInitial(() -> true);
+    private record BufferBudget(RtLodMemory memory,long limit,RtLodMemory.Heap heap) {}
+    private final ThreadLocal<BufferBudget> bufferBudget=new ThreadLocal<>();
+    private final RtWaterBoundsCache waterBoundsCache;
     private final int localHeapIndex;
     private final long localHeapBytes;
     private RtLodMemory.Heap memorySample;
@@ -104,6 +107,7 @@ public final class RtContext {
         }
         localHeapIndex=heapIndex; localHeapBytes=heapBytes;
         this.gpuExecutor = new RtGpuExecutor(this);
+        this.waterBoundsCache = new RtWaterBoundsCache(this);
     }
 
     /** The RT context for the current Vulkan device, or null if RT/Vulkan isn't available. */
@@ -214,6 +218,7 @@ public final class RtContext {
     }
 
     public RtLodMemory lodMemory() { return lodMemory; }
+    public RtWaterBoundsCache waterBoundsCache() { return waterBoundsCache; }
     public void tickMemoryBudget() { Vma.vmaSetCurrentFrameIndex(vma, ++memoryFrame); }
     public long lodMemoryLimitBytes(RtLodMemory.Heap heap) {
         return RtLodMemory.limitBytes(Long.getLong("gysf.voxy.memoryBudgetMiB",0L),heap.budgetBytes());
@@ -247,15 +252,28 @@ public final class RtContext {
     public AllocationScope lodAllocations() { return new AllocationScope(true); }
     /** Small section tables must remain publishable to retire old geometry under pressure. */
     public AllocationScope lodMetadata() { return new AllocationScope(false); }
+    /** Optional resources use an independent quota; they never consume the terrain's native quota. */
+    public synchronized AllocationScope bufferAllocations(RtLodMemory memory,long limit) {
+        memorySample=null;
+        var heap=memoryBudget();
+        var ownHeap=new RtLodMemory.Heap(heap.usageBytes(),heap.budgetBytes(),heap.rtAllocationBytes(),
+                memory.liveBytes(),heap.driverReported(),heap.pooledFreeBytes());
+        return new AllocationScope(true,new BufferBudget(memory,limit,ownHeap));
+    }
     public final class AllocationScope implements AutoCloseable {
         private boolean closed;
         private final boolean previousEnforcement;
+        private final BufferBudget previousBudget;
         private AllocationScope(boolean enforce) {
+            this(enforce,bufferBudget.get());
+        }
+        private AllocationScope(boolean enforce,BufferBudget budget) {
             previousEnforcement=lodQuotaEnforced.get();
+            previousBudget=bufferBudget.get();bufferBudget.set(budget);
             lodAllocationDepth.set(lodAllocationDepth.get()+1); lodQuotaEnforced.set(enforce);
         }
         @Override public void close() {
-            if(!closed) { lodAllocationDepth.set(lodAllocationDepth.get()-1); lodQuotaEnforced.set(previousEnforcement); closed=true; }
+            if(!closed) { lodAllocationDepth.set(lodAllocationDepth.get()-1); lodQuotaEnforced.set(previousEnforcement); bufferBudget.set(previousBudget);closed=true; }
         }
     }
 
@@ -338,9 +356,10 @@ public final class RtContext {
         long handle = 0L;
         long allocation = 0L;
         RtLodMemory.Ticket lodTicket=null;
+        BufferBudget budget=bufferBudget.get();
         if(lodAllocationDepth.get()>0) {
-            var heap=memoryBudget();
-            lodTicket=lodMemory.reserve(size,lodQuotaEnforced.get()?lodMemoryLimitBytes(heap):Long.MAX_VALUE,
+            var heap=budget==null?memoryBudget():budget.heap();
+            lodTicket=(budget==null?lodMemory:budget.memory()).reserve(size,budget!=null?budget.limit():lodQuotaEnforced.get()?lodMemoryLimitBytes(heap):Long.MAX_VALUE,
                     heap,!hostVisible && lodQuotaEnforced.get());
         }
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -372,7 +391,7 @@ public final class RtContext {
             VmaAllocationInfo info = VmaAllocationInfo.calloc(stack);
             int allocationResult=Vma.vmaCreateBuffer(vma,bci,aci,pBuf,pAlloc,info);
             if(lodTicket!=null && allocationResult==VK10.VK_ERROR_OUT_OF_DEVICE_MEMORY)
-                throw lodMemory.nativeFailure(size,lodMemoryLimitBytes(memoryBudget()));
+                throw (budget==null?lodMemory:budget.memory()).nativeFailure(size,budget==null?lodMemoryLimitBytes(memoryBudget()):budget.limit());
             check(allocationResult, "vmaCreateBuffer");
             handle = pBuf.get(0);
             allocation = pAlloc.get(0);
@@ -603,7 +622,9 @@ public final class RtContext {
     }
 
     public void destroy() {
+        waterBoundsCache.close();
         gpuExecutor.shutdown();
+        waterBoundsCache.afterExecutorShutdown();
         if (commandPool != 0L) {
             VK10.vkDestroyCommandPool(vk, commandPool, null);
             commandPool = 0L;

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync,[switch]$RequireWaterField,[switch]$RequireWaterGuides,[switch]$RequireGpuTimings,
+param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync,[switch]$RequireWaterField,[switch]$RequireWaterGuides,[switch]$RequireGpuTimings,[switch]$RequireWaterBoundsCache,
       [ValidateRange(1,64)][int]$GuideCaptureCount=4)
 $ErrorActionPreference='Stop'
 $content=Get-Content -LiteralPath $Path -Raw
@@ -14,6 +14,13 @@ if($shutdowns.Count -eq 0 -or ($shutdowns | Where-Object { [long]$_.Groups[1].Va
     throw "Missing or nonzero native LOD shutdown in $Path"
 }
 $fieldShutdowns=[regex]::Matches($content,'Water field GPU shutdown: live=(\d+) bytes')
+$cacheShutdowns=[regex]::Matches($content,'Water bounds cache shutdown: live=(\d+) bytes, peak=\d+ bytes, inputs=(\d+) bytes, sources=(\d+), pending=(\d+), published=(\d+)')
+if($cacheShutdowns | Where-Object {[long]$_.Groups[1].Value -ne 0 -or [long]$_.Groups[2].Value -ne 0 -or [long]$_.Groups[3].Value -ne 0 -or [long]$_.Groups[4].Value -ne 0}) {
+    throw "Nonzero water bounds cache shutdown in $Path"
+}
+if($RequireWaterBoundsCache -and ($cacheShutdowns.Count -eq 0 -or !($cacheShutdowns | Where-Object {[long]$_.Groups[5].Value -gt 0}))) {
+    throw "Missing live water bounds cache publication/shutdown qualification in $Path"
+}
 if($fieldShutdowns | Where-Object {[long]$_.Groups[1].Value -ne 0}) {throw "Nonzero water field shutdown in $Path"}
 if($RequireWaterField -and ($fieldShutdowns.Count -eq 0 -or $content -notmatch 'GYSF_WATER_FIELD: PASS')) {
     throw "Missing GPU water field residency/shutdown qualification in $Path"

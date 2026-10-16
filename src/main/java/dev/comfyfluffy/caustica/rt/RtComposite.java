@@ -1546,6 +1546,9 @@ public final class RtComposite {
         long dstImage = vkImage(nativeColor);
         var encoder = (VulkanCommandEncoder) ((FrontendCommandEncoder) RenderSystem.getDevice().createCommandEncoder()).backend();
         RtGpuExecutor gpuExecutor = ctx.gpuExecutor();
+        float frameWaterStrength=CausticaConfig.Rt.Composite.WATER_WAVE_STRENGTH.value();
+        boolean frameWaterWaves=waterWaves();
+        ctx.waterBoundsCache().beginFrame(frameCounter,frameWaterStrength,frameWaterWaves);
         // Reserve the graphics-use value that guards this frame's reusable TLAS and entity resources.
         RtGpuExecutor.GraphicsUse graphicsUse = gpuExecutor.beginGraphicsUse(encoder);
         RtGpuExecutor.GraphicsUseWaiter graphicsUseWaiter = gpuExecutor.graphicsUseWaiter();
@@ -1667,7 +1670,7 @@ public final class RtComposite {
                     flags |= 0b01;
                 }
             }
-            if (waterWaves()) {
+            if (frameWaterWaves) {
                 flags |= 0b10000; // W1: animated geometric water waves
             }
             if (CausticaConfig.Rt.Composite.PARALLAX_SMOOTHING.value()) {
@@ -1780,7 +1783,7 @@ public final class RtComposite {
                     // scale (0 = default clarity); y/z/w = live Animated Water tuning the spectrum
                     // multiplies in (height scale, speed scale, wave count) — 1/1/7 = authored look.
                     new Float4(CausticaConfig.Rt.Composite.WATER_OPACITY.value(),
-                            CausticaConfig.Rt.Composite.WATER_WAVE_STRENGTH.value(),
+                            frameWaterStrength,
                             CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.value(),
                             (float) CausticaConfig.Rt.Composite.WATER_WAVE_DETAIL.value()),
                     // Material appearance lane: x is the optional metallic polish amount. It is read

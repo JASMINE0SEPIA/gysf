@@ -20,6 +20,29 @@ public final class RtWaterGeometry {
 
     private RtWaterGeometry() {}
 
+    /** Immutable CPU input for optional derived BLAS bounds; no shader attributes are duplicated. */
+    public static final class BoundsInput {
+        private final float[] wide,top;
+        private BoundsInput(Packed packed) {
+            wide=packed.aabbs().clone();top=new float[packed.triangleCount()];
+            java.util.Arrays.fill(top,Float.NaN);
+            for(int t=0;t<top.length;t++) {
+                int p=t*PRIMITIVE_FLOATS;
+                if(packed.primitives()[p+3]!=0)top[t]=Math.max(packed.primitives()[p+1],
+                        Math.max(packed.primitives()[p+5],packed.primitives()[p+9]));
+            }
+        }
+        public int count(){return top.length;}
+        public long bytes(){return ((long)wide.length+top.length)*Float.BYTES;}
+        public float[] atHeight(float height) {
+            if(!Float.isFinite(height)||height<0||height>MAX_DISPLACEMENT)throw new IllegalArgumentException("Invalid water height envelope");
+            float[] result=wide.clone();
+            for(int t=0;t<top.length;t++)if(!Float.isNaN(top[t]))result[t*6+4]=Math.nextUp(top[t]+height+PADDING);
+            return result;
+        }
+    }
+    public static BoundsInput boundsInput(Packed packed) {return new BoundsInput(packed);}
+
     /**
      * Water quads must be contiguous pairs in the existing packed index order. An optional envelope
      * contains four values per quad: x0z0, x0z1, x1z0, x1z1. Missing weights mean fully wet; callers

@@ -15,7 +15,7 @@ abstract class WaterBoundsAccelMixin {
     @Inject(method="prepareWaterBlas",at=@At("RETURN"))
     private static void gysf$capture(RtContext ctx,RtBuffer bounds,int count,String label,
                                     CallbackInfoReturnable<RtAccel.PreparedBlas> ci) {
-        WaterBoundsComparison.captured(ci.getReturnValue(),count);
+        WaterBoundsComparison.captured(ci.getReturnValue(),count,label);
     }
     @Inject(method="destroy",at=@At("HEAD"))
     private void gysf$retire(CallbackInfo ci){WaterBoundsComparison.retired(deviceAddress);}

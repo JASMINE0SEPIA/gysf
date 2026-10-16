@@ -138,6 +138,18 @@ for phase, rows in sorted(groups.items()):
             if min(vals) != max(vals):
                 raise SystemExit(f"INVALID: water field {key} changed during phase {phase}")
             item[key] = vals[0]
+    cache_keys = ("waterCacheSources", "waterCacheReady", "waterCachePending", "waterCachePublished",
+                  "waterCacheHits", "waterCacheMisses", "waterCacheInputDeferrals")
+    if any(key in rows[0] for key in cache_keys):
+        if not all(key in rows[0] for key in cache_keys):
+            raise SystemExit("INVALID: incomplete water cache evidence")
+        for key in cache_keys:
+            vals = [int(r[key]) for r in rows]
+            if min(vals) < 0 or min(vals) != max(vals):
+                raise SystemExit(f"INVALID: water cache {key} changed during phase {phase}")
+            item[key] = vals[0]
+        if item["waterCachePending"] or item["waterCacheMisses"]:
+            raise SystemExit("INVALID: water cache work or eligible misses during measurement")
     item["excluded"] = phase in excluded
     report["phases"].append(item)
 report["geometryStableAcrossAllPhases"] = all(
@@ -189,7 +201,7 @@ if metadata and metadata.get("waterShaderBaseline"):
         if len(hit_candidates) > 1:
             raise SystemExit("INVALID: hit-stage candidate shader changed between phases")
         report["shaderComparison"]["hitStage"] = {"baseline": hit_baseline, "candidates": sorted(hit_candidates)}
-if metadata and metadata.get("compareWaterBounds"):
+if metadata and (metadata.get("compareWaterBounds") or metadata.get("compareWaterCache")):
     sequence = [int(v) for v in metadata["waterBoundsSequence"].split(",")]
     if len(sequence) == 1:
         sequence *= len(report["phases"])
@@ -210,7 +222,8 @@ if metadata and metadata.get("compareWaterBounds"):
     children = int(report["phases"][0]["waterBoundsChildren"])
     if children <= 0:
         raise SystemExit("INVALID: no matched water children")
-    report["boundsComparison"] = {"sequence": sequence, "source": source, "children": children, "orderValidated": True, "settingsMatched": True}
+    report["boundsComparison"] = {"mode": "runtime-cache" if metadata.get("compareWaterCache") else "shadow",
+                                  "sequence": sequence, "source": source, "children": children, "orderValidated": True, "settingsMatched": True}
 report["selectedGeometryStable"] = bool(included) and all(item["geometryStable"] for item in included) and all(
     len({tuple(item[k]) for item in included}) == 1 for k in ("nearInstances", "lodSections")) and len({item["nearRadius"] for item in included})==1
 report["selectedSceneVersionsStable"] = bool(included) and all(item.get("versionsStable", False) for item in included)
@@ -224,6 +237,12 @@ if included and all(item["renderEvidence"] for item in included):
 if included and all("waterUploads" in item for item in included):
     report["waterFieldStable"] = all(len({item[k] for item in included}) == 1 for k in ("waterUploads", "waterKnownNodes", "waterPending"))
     report["comparisonAccepted"] &= report["waterFieldStable"]
+if included and all("waterCacheSources" in item for item in included):
+    report["waterCacheStable"] = all(len({item[k] for item in included}) == 1 for k in cache_keys)
+    report["comparisonAccepted"] &= report["waterCacheStable"]
+if metadata and metadata.get("waterBoundsCache") and metadata.get("finiteWater"):
+    if not included or any(item.get("waterCacheReady", 0) <= 0 or item.get("waterCacheHits", 0) <= 0 for item in included):
+        raise SystemExit("INVALID: requested runtime water cache was not exercised")
 report["validationDiagnostic"] = a.validation or bool(metadata and metadata.get("validation"))
 report["cadenceQualified"] = bool(report["comparisonAccepted"] and all(item["renderEvidence"] for item in included)
     and metadata is not None and not report["validationDiagnostic"]

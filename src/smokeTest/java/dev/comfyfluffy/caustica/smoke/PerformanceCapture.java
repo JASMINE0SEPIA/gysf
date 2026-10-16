@@ -35,6 +35,7 @@ public final class PerformanceCapture {
     private static String phaseScene;
     private static long lastWaterUploads=-1,lastWaterNodes=-1;
     private static int lastWaterPending=-1;
+    private static long lastCachePublished=-1;
 
     private static int[] qualities() {
         String value=System.getProperty("gysf.smoke.perfQualities","0");
@@ -59,7 +60,7 @@ public final class PerformanceCapture {
             try { Files.createDirectories(output); }
             catch(IOException e){throw new UncheckedIOException(e);}
             if(Files.exists(output.resolve("frames.csv")))throw new IllegalStateException("Fresh performance label required");
-            rows.append("phase,rr,preset,elapsedMs,intervalMs,rtFrame,processBytes,budgetBytes,rtAllocationBytes,lodBytes,providerBytes,nearRadius,nearInstances,lodSections,deferrals,cameraX,cameraY,cameraZ,yaw,pitch,screen,lodRevision,texturedBuilds,atomicSwaps,nearTable,nearBuildToken,quality,renderWidth,renderHeight,displayWidth,displayHeight,filter,spp,bounces,finiteWater,omm,nearPending,lodPending,waterUploads,waterKnownNodes,waterPending,waterShader,waterHitShader,waterBoundsVariant,waterBoundsSource,waterBoundsChildren,waterWaveStrength,waterWaveSpeed,waterWaveCount\n");
+            rows.append("phase,rr,preset,elapsedMs,intervalMs,rtFrame,processBytes,budgetBytes,rtAllocationBytes,lodBytes,providerBytes,nearRadius,nearInstances,lodSections,deferrals,cameraX,cameraY,cameraZ,yaw,pitch,screen,lodRevision,texturedBuilds,atomicSwaps,nearTable,nearBuildToken,quality,renderWidth,renderHeight,displayWidth,displayHeight,filter,spp,bounces,finiteWater,omm,nearPending,lodPending,waterUploads,waterKnownNodes,waterPending,waterShader,waterHitShader,waterBoundsVariant,waterBoundsSource,waterBoundsChildren,waterWaveStrength,waterWaveSpeed,waterWaveCount,waterCacheSources,waterCacheReady,waterCachePending,waterCachePublished,waterCacheHits,waterCacheMisses,waterCacheInputDeferrals\n");
             // A non-RR control must not silently inherit another vendor filter/upscaler or FG.
             CausticaConfig.Rt.Fsr.ENABLED.set(false);CausticaConfig.Rt.Xess.ENABLED.set(false);
             CausticaConfig.Rt.Fg.ENABLED.set(false);CausticaConfig.Rt.Nrd.ENABLED.set(false);
@@ -161,10 +162,12 @@ public final class PerformanceCapture {
         if(near.hasPendingBuilds() || RtDistantHorizonsTerrain.INSTANCE.hasPendingBuilds())
             throw new IllegalStateException("Geometry work resumed during measured frames; comparison rejected");
         var water=RtComposite.INSTANCE.waterFieldStatistics();
+        var cache=ctx.waterBoundsCache().statistics();
+        if(cache.pending()!=0||cache.eligibleMisses()!=0)throw new IllegalStateException("Water bounds cache resumed work during measured frames");
         String scene=nearRadius(near)+":"+near.staticInstances().size()+":"+near.tableAddress()+":"+nearBuildToken(near)
                 +":"+RtDistantHorizonsTerrain.INSTANCE.residentSectionCount()+":"+RtDistantHorizonsTerrain.INSTANCE.emissiveRevision()
                 +":"+RtDistantHorizonsTerrain.INSTANCE.texturedBuildCount()+":"+RtDistantHorizonsTerrain.INSTANCE.atomicVoxySwapCount()
-                +":"+water.uploads()+":"+water.knownNodes()+":"+water.pending();
+                +":"+water.uploads()+":"+water.knownNodes()+":"+water.pending()+":"+cache.sources()+":"+cache.ready()+":"+cache.published();
         if(phaseScene==null)phaseScene=scene;
         else if(!phaseScene.equals(scene))throw new IllegalStateException("Published geometry changed during measured phase");
         double ms=(now-previous)/1e6;intervals.add(ms);
@@ -190,16 +193,20 @@ public final class PerformanceCapture {
                 .append(WaterBoundsComparison.variant()).append(',').append(WaterBoundsComparison.measuredSource(rtFrame)).append(',')
                 .append(WaterBoundsComparison.children()).append(',').append(CausticaConfig.Rt.Composite.WATER_WAVE_STRENGTH.value()).append(',')
                 .append(CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.value()).append(',')
-                .append(CausticaConfig.Rt.Composite.WATER_WAVE_DETAIL.value()).append('\n');
+                .append(CausticaConfig.Rt.Composite.WATER_WAVE_DETAIL.value()).append(',')
+                .append(cache.sources()).append(',').append(cache.ready()).append(',').append(cache.pending()).append(',')
+                .append(cache.published()).append(',').append(cache.hits()).append(',').append(cache.eligibleMisses()).append(',')
+                .append(cache.inputDeferrals()).append('\n');
     }
 
     public static boolean locked() {
-        return ENABLED && preparedAt!=0 && Minecraft.getInstance().level!=null && Minecraft.getInstance().player!=null;
+        return (ENABLED&&preparedAt!=0||WaterCacheLifecycle.running()) && Minecraft.getInstance().level!=null && Minecraft.getInstance().player!=null;
     }
 
     public static void enforceCamera() {
         if(!locked())return;
         var client=Minecraft.getInstance();
+        if(WaterCacheLifecycle.ENABLED){WaterCacheLifecycle.enforceCamera(client);return;}
         if(client.gui.screen()!=null)client.gui.setScreen(null);
         net.minecraft.client.KeyMapping.releaseAll();
         client.player.setPos(.5,140,.5);
@@ -226,10 +233,13 @@ public final class PerformanceCapture {
         long revision=lod.emissiveRevision(),packed=lod.texturedBuildCount(),swaps=lod.atomicVoxySwapCount(),token=nearBuildToken(near);
         int instances=near.staticInstances().size();
         var water=RtComposite.INSTANCE.waterFieldStatistics();
+        var cache=RtContext.currentOrNull().waterBoundsCache().statistics();
+        if(cache.pending()!=0||cache.eligibleMisses()!=0){quietSince=now;return false;}
         if(revision!=lastLodRevision || packed!=lastPacked || swaps!=lastSwaps || token!=lastNearToken || instances!=lastNearInstances
-                ||water.uploads()!=lastWaterUploads||water.knownNodes()!=lastWaterNodes||water.pending()!=lastWaterPending) {
+                ||water.uploads()!=lastWaterUploads||water.knownNodes()!=lastWaterNodes||water.pending()!=lastWaterPending||cache.published()!=lastCachePublished) {
             quietSince=now;lastLodRevision=revision;lastPacked=packed;lastSwaps=swaps;lastNearToken=token;lastNearInstances=instances;
             lastWaterUploads=water.uploads();lastWaterNodes=water.knownNodes();lastWaterPending=water.pending();
+            lastCachePublished=cache.published();
         }
         return quietSince!=0 && now-quietSince>=10*SECOND;
     }

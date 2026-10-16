@@ -107,6 +107,10 @@ public final class GysfSmokeClient implements ClientModInitializer {
         }
         if (client.level==null || client.player==null) return;
         worldTicks++;
+        if(WaterCacheLifecycle.ENABLED) {
+            if(WaterCacheLifecycle.tick(client,worldTicks)){finished=true;client.disconnectWithSavingScreen();}
+            return;
+        }
         if(PERFORMANCE) {
             if(PerformanceCapture.tick(client,worldTicks)) { finished=true;client.disconnectWithSavingScreen(); }
             return;

@@ -89,6 +89,7 @@ final class RtSectionBuilder {
                     waterPacked!=null ? java.util.Arrays.copyOf(packed.bucketTris(),RtAccel.BUCKET_WATER) : packed.bucketTris(),
                     ommInput, compactBlas, label + " BLAS");
             if(waterPacked!=null)waterBlas=RtAccel.prepareWaterBlas(ctx,waterBounds,waterPacked.triangleCount(),label+" water BLAS");
+            if(waterBlas!=null)ctx.waterBoundsCache().register(waterBlas.accel,waterPacked);
             return new PreparedSection(key, positions, indices, uvs, material, water, waterBounds, upload, blas, waterBlas,
                     packed.triBase(), sox, soy, soz, packed.lights(),
                     waterPacked==null ? new long[0] : RtWaterFieldImage.domainTiles(waterPacked,sox,soy,soz));

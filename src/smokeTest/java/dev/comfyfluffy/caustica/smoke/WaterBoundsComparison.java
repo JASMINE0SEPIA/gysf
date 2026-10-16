@@ -14,9 +14,10 @@ import static org.lwjgl.vulkan.VK10.*;
 import static org.lwjgl.vulkan.KHRAccelerationStructure.*;
 import static org.lwjgl.vulkan.KHRRayTracingPipeline.*;
 
-/** Smoke-only matched physical surfaces with wide/tight water BLAS bounds. No shipping geometry change. */
+/** Smoke-only A/B selection: independent shadow builds or the actual runtime cache. */
 public final class WaterBoundsComparison {
-    public static final boolean ENABLED=Boolean.getBoolean("gysf.smoke.compareWaterBounds");
+    public static final boolean RUNTIME_CACHE=Boolean.getBoolean("gysf.smoke.compareWaterCache");
+    public static final boolean ENABLED=Boolean.getBoolean("gysf.smoke.compareWaterBounds")||RUNTIME_CACHE;
     private static final int[] SEQUENCE=Arrays.stream(System.getProperty("gysf.smoke.waterBoundsSequence","0,1,1,0").split(","))
             .mapToInt(Integer::parseInt).toArray();
     private record Input(float[] bounds,byte[] geometryHash,int triangles,int tops) {}
@@ -24,6 +25,7 @@ public final class WaterBoundsComparison {
     private static final Map<Long,Input> captured=new ConcurrentHashMap<>();
     private static final Map<Long,RtAccel> alternate=new ConcurrentHashMap<>();
     private static final Set<Long> seen=new HashSet<>();
+    private static Set<Long> expected=Set.of();
     private static volatile boolean prepared,building,invalidated;
     private static long observedFrame=-1;
     private static int variant,selections,observedVariant=-1;
@@ -38,8 +40,8 @@ public final class WaterBoundsComparison {
 
     public static void packed(RtWaterGeometry.Packed p) {
         if(!ENABLED)return;
-        float[] narrow=p.aabbs().clone(),primitives=p.primitives();
-        for(int triangle=0;triangle<p.triangleCount();triangle++) {
+        float[] narrow=RUNTIME_CACHE?new float[0]:p.aabbs().clone(),primitives=p.primitives();
+        for(int triangle=0;!RUNTIME_CACHE&&triangle<p.triangleCount();triangle++) {
             int v=triangle*RtWaterGeometry.PRIMITIVE_FLOATS;
             if(primitives[v+3]==0)continue;
             float top=Math.max(primitives[v+1],Math.max(primitives[v+5],primitives[v+9]));
@@ -50,8 +52,9 @@ public final class WaterBoundsComparison {
         packed.set(new Input(narrow,digest.digest(),p.triangleCount(),p.topTriangles()));
     }
 
-    public static void captured(RtAccel.PreparedBlas blas,int count) {
+    public static void captured(RtAccel.PreparedBlas blas,int count,String label) {
         if(!ENABLED||building)return;
+        if(RUNTIME_CACHE&&label.equals("water bounds cache BLAS"))return;
         Input input=packed.get();packed.remove();
         if(input==null||input.triangles()!=count)throw new IllegalStateException("Water bounds capture lost its source pack");
         if(captured.putIfAbsent(blas.accel.deviceAddress,input)!=null)throw new IllegalStateException("Duplicate live water BLAS address");
@@ -60,7 +63,7 @@ public final class WaterBoundsComparison {
     public static void retired(long address) {
         if(!ENABLED)return;
         captured.remove(address);
-        if(prepared&&alternate.containsKey(address))invalidated=true;
+        if(prepared&&expected.contains(address))invalidated=true;
     }
 
     public static void prepare() {
@@ -69,6 +72,7 @@ public final class WaterBoundsComparison {
             throw new IllegalStateException("Bounds comparison requires isolated finite-water performance mode");
         checkSettings();
         var ctx=RtContext.currentOrNull();ctx.waitIdle();
+        if(RUNTIME_CACHE&&!ctx.waterBoundsCache().enabled())throw new IllegalStateException("Actual runtime cache must be enabled");
         var near=RtTerrain.currentOrNull();
         var instances=RtDistantHorizonsTerrain.INSTANCE.appendInstances(near.staticInstances(),near.blockX,near.blockY,near.blockZ);
         Set<Long> active=new TreeSet<>();
@@ -82,6 +86,7 @@ public final class WaterBoundsComparison {
                 if(input==null)throw new IllegalStateException("Missing captured resident water geometry");
                 source.update(ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(address).array());
                 source.update(input.geometryHash());triangles+=input.triangles();tops+=input.tops();
+                if(RUNTIME_CACHE)continue;
                 var bounds=ctx.createBuffer((long)input.bounds().length*4,VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
                         true,"smoke tight water bounds");
                 RtAccel.PreparedBlas op=null;
@@ -105,9 +110,9 @@ public final class WaterBoundsComparison {
                 finally {if(op!=null)RtAccel.freeBlasScratch(List.of(op));bounds.destroy();}
             }
             if(tops==0)throw new IllegalStateException("No displaced water tops in bounds comparison");
-            sourceHash=HexFormat.of().formatHex(source.digest());prepared=true;
+            sourceHash=HexFormat.of().formatHex(source.digest());expected=Set.copyOf(active);prepared=true;
             System.out.println("GYSF_BOUNDS_COMPARE: ready children="+active.size()+" triangles="+triangles+" tops="+tops
-                    +" source="+sourceHash+" wide=2.2 tight=0.55");
+                    +" source="+sourceHash+" wide=2.2 tight=0.55 mode="+(RUNTIME_CACHE?"runtime-cache":"shadow"));
         } finally {building=false;}
     }
 
@@ -121,25 +126,39 @@ public final class WaterBoundsComparison {
     }
 
     public static long address(long original) {
-        if(!prepared)return original;
+        if(!prepared||RUNTIME_CACHE)return original;
         RtAccel replacement=alternate.get(original);
         if(replacement==null)throw new IllegalStateException("Unmatched water child entered the comparison");
+        observe(original);
+        return variant==0?original:replacement.deviceAddress;
+    }
+
+    /** Runs after the real manager resolves and tracks its graphics use in BOTH variants. */
+    public static long cachedAddress(long original,long resolved) {
+        if(!RUNTIME_CACHE||!prepared)return resolved;
+        Input input=captured.get(original);
+        if(input==null||!expected.contains(original))throw new IllegalStateException("Runtime cache source changed during comparison");
+        if(input.tops()>0&&resolved==original)throw new IllegalStateException("Eligible water child did not resolve to the actual runtime cache");
+        observe(original);
+        return variant==0?original:resolved;
+    }
+
+    private static void observe(long original) {
         long frame=RtComposite.frameCounter();
         if(observedFrame!=frame){observedFrame=frame;observedVariant=variant;seen.clear();}
         if(observedVariant!=variant)throw new IllegalStateException("Water bounds variant changed while packing one TLAS");
         seen.add(original);
-        return variant==0?original:replacement.deviceAddress;
     }
 
     public static String measuredSource(long frame) {
         if(!ENABLED)return "none";
         checkSettings();
-        if(!prepared||invalidated||observedFrame!=frame||observedVariant!=variant||!seen.equals(alternate.keySet()))
+        if(!prepared||invalidated||observedFrame!=frame||observedVariant!=variant||!seen.equals(expected))
             throw new IllegalStateException("Bounds comparison did not observe the complete immutable water scene");
         return sourceHash;
     }
     public static int variant(){return ENABLED?variant:-1;}
-    public static int children(){return alternate.size();}
+    public static int children(){return expected.size();}
 
     public static void destroy() {
         if(!ENABLED)return;
@@ -147,7 +166,7 @@ public final class WaterBoundsComparison {
         var ctx=RtContext.currentOrNull();if(ctx!=null)ctx.waitIdle();
         int count=alternate.size();
         for(var accel:alternate.values())accel.destroy();
-        alternate.clear();captured.clear();seen.clear();packed.remove();
+        alternate.clear();captured.clear();seen.clear();expected=Set.of();packed.remove();
         System.out.println("GYSF_BOUNDS_COMPARE: complete selections="+selections+" released="+count+" liveAlternates=0");
     }
 

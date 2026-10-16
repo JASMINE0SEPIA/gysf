@@ -131,10 +131,20 @@ public final class RtAccel {
         this.opacityMicromap = opacityMicromap;
     }
 
+    private Runnable destroyCallback;
+
+    /** Set before publication so derived resources cannot outlive an untracked source identity. */
+    public void onDestroy(Runnable callback) {
+        if(destroyed||destroyCallback!=null)throw new IllegalStateException("AS destruction callback already owned");
+        destroyCallback=java.util.Objects.requireNonNull(callback);
+    }
+
     public void destroy() {
         if (destroyed) {
             return;
         }
+        Runnable callback=destroyCallback;destroyCallback=null;
+        if(callback!=null)callback.run();
         if (handle != 0L) {
             vkDestroyAccelerationStructureKHR(vk, handle, null);
         }
@@ -1107,8 +1117,8 @@ public final class RtAccel {
         }
         ring.cursor = (ring.cursor + 1) % TlasRing.RING;
 
-        writeTlasInstances(baseInstances, slot.instanceBuffer.mapped, 0);
-        writeTlasInstances(dynamicInstances, slot.instanceBuffer.mapped, baseCount);
+        writeTlasInstances(ctx,graphicsUse,baseInstances, slot.instanceBuffer.mapped, 0);
+        writeTlasInstances(ctx,graphicsUse,dynamicInstances, slot.instanceBuffer.mapped, baseCount);
         if (count > 0) {
             slot.instanceBuffer.flush(0L, (long) count * VkAccelerationStructureInstanceKHR.SIZEOF);
         }
@@ -1118,20 +1128,25 @@ public final class RtAccel {
     }
 
     // Wrap the mapped Vulkan array in LWJGL structs so its generated accessors own the native ABI/bitfields.
-    static void writeTlasInstances(List<Instance> instances, long mapped, int firstInstance) {
+    static void writeTlasInstances(List<Instance> instances,long mapped,int firstInstance) {
+        writeTlasInstances(null,null,instances,mapped,firstInstance);
+    }
+    static void writeTlasInstances(RtContext ctx,GraphicsUse graphicsUse,List<Instance> instances, long mapped, int firstInstance) {
         VkAccelerationStructureInstanceKHR.Buffer records = VkAccelerationStructureInstanceKHR.create(
                 mapped + (long) firstInstance * VkAccelerationStructureInstanceKHR.SIZEOF, physicalInstanceCount(instances));
         int cursor=0;
         for (int i = 0, count = instances.size(); i < count; i++) {
             Instance instance = instances.get(i);
             for(int component=0;component<instance.physicalCount();component++) {
+                long blasAddress=instance.physicalAddress(component);
+                if(component==1&&ctx!=null)blasAddress=ctx.waterBoundsCache().resolve(blasAddress,graphicsUse);
                 VkAccelerationStructureInstanceKHR record = records.get(cursor++);
                 record.transform().matrix().put(instance.transform3x4());
                 record.instanceCustomIndex(instance.customIndex())
                     .mask(instance.mask())
                     .instanceShaderBindingTableRecordOffset(instance.sbtRecordOffset())
                     .flags(component==0 ? VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR : 0)
-                    .accelerationStructureReference(instance.physicalAddress(component));
+                    .accelerationStructureReference(blasAddress);
             }
         }
     }

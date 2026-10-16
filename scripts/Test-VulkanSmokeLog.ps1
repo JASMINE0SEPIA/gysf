@@ -26,14 +26,21 @@ $cases=@(
     @{Name='timing-required';Text=$clean;Reject=$true;Timings=$true},
     @{Name='timing-live-pool';Text="$clean`nGYSF_GPU_TIMINGS: complete samples=5 skipped=0 livePools=1";Reject=$true},
     @{Name='timing-uninitialized';Text="$clean`nGYSF_GPU_TIMINGS: complete samples=5 skipped=0 livePools=0";Reject=$true;Timings=$true},
-    @{Name='timing-qualified';Text="$clean`nGYSF_GPU_TIMINGS: start timestampBits=64`nGYSF_GPU_TIMINGS: complete samples=5 skipped=0 livePools=0";Reject=$false;Timings=$true}
+    @{Name='timing-qualified';Text="$clean`nGYSF_GPU_TIMINGS: start timestampBits=64`nGYSF_GPU_TIMINGS: complete samples=5 skipped=0 livePools=0";Reject=$false;Timings=$true},
+    @{Name='cache-required';Text=$clean;Reject=$true;Cache=$true},
+    @{Name='cache-unpublished';Text="$clean`nWater bounds cache shutdown: live=0 bytes, peak=64 bytes, inputs=0 bytes, sources=0, pending=0, published=0";Reject=$true;Cache=$true},
+    @{Name='cache-qualified';Text="$clean`nWater bounds cache shutdown: live=0 bytes, peak=64 bytes, inputs=0 bytes, sources=0, pending=0, published=2";Reject=$false;Cache=$true},
+    @{Name='cache-native-leak';Text="$clean`nWater bounds cache shutdown: live=1 bytes, peak=64 bytes, inputs=0 bytes, sources=0, pending=0, published=2";Reject=$true},
+    @{Name='cache-input-leak';Text="$clean`nWater bounds cache shutdown: live=0 bytes, peak=64 bytes, inputs=1 bytes, sources=0, pending=0, published=2";Reject=$true},
+    @{Name='cache-source-leak';Text="$clean`nWater bounds cache shutdown: live=0 bytes, peak=64 bytes, inputs=0 bytes, sources=1, pending=0, published=2";Reject=$true},
+    @{Name='cache-pending-leak';Text="$clean`nWater bounds cache shutdown: live=0 bytes, peak=64 bytes, inputs=0 bytes, sources=0, pending=1, published=2";Reject=$true}
 )
 foreach($case in $cases) {
     $casePath=Join-Path $testRoot ($case.Name+'.log')
     Set-Content -LiteralPath $casePath -Value $case.Text -Encoding utf8
     $rejected=$false
     $taskGuideCount=if($case.GuideCount){$case.GuideCount}else{4}
-    try { & (Join-Path $PSScriptRoot 'Assert-VulkanSmokeLog.ps1') -Path $casePath -RequireWaterField:([bool]$case.Field) -RequireWaterGuides:([bool]$case.Guides) -GuideCaptureCount $taskGuideCount -RequireGpuTimings:([bool]$case.Timings) | Out-Null }
+    try { & (Join-Path $PSScriptRoot 'Assert-VulkanSmokeLog.ps1') -Path $casePath -RequireWaterField:([bool]$case.Field) -RequireWaterGuides:([bool]$case.Guides) -GuideCaptureCount $taskGuideCount -RequireGpuTimings:([bool]$case.Timings) -RequireWaterBoundsCache:([bool]$case.Cache) | Out-Null }
     catch {$rejected=$true}
     if($rejected -ne $case.Reject) {throw "Smoke log checker regression: $($case.Name)"}
 }
