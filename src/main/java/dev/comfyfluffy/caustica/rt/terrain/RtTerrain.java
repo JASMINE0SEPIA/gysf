@@ -238,6 +238,14 @@ public final class RtTerrain {
         return table.instances;
     }
 
+    /** Render-thread view of published geometry only; pending/cancelled builders own no field residency. */
+    public void collectWaterDomainTiles(java.util.function.LongConsumer target) {
+        for(long key:published) {
+            SectionGeom geom=resident.get(key);
+            if(geom!=null)for(long owner:geom.waterDomainTiles)target.accept(owner);
+        }
+    }
+
     /** Render-thread view, including invalidated tasks still retiring native allocations. */
     public boolean hasPendingBuilds() {
         synchronized(activeTaskLock) {
@@ -1626,7 +1634,7 @@ public final class RtTerrain {
         for (PreparedSection ps : prepared) {
             SectionGeom g = new SectionGeom(ps.key(), ps.uvs(), ps.material(),
                     ps.blas().accel, ps.water(), ps.waterBlas()!=null ? ps.waterBlas().accel : null,
-                    ps.triBase(), ps.sx(), ps.sy(), ps.sz(), ps.lights());
+                    ps.triBase(), ps.sx(), ps.sy(), ps.sz(), ps.lights(),ps.waterDomainTiles());
             if (!desired.contains(ps.key())) {
                 // Left the window while its batched BLAS build was in flight (window sync keeps running
                 // during builds). Never published — retire the fresh, unreferenced geometry.

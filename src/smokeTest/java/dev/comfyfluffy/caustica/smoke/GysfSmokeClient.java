@@ -150,7 +150,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
                 pressureFallbackFrames++;
             observedReducedProvider|=VoxyCompat.renderDistanceChunks()*16<VoxyCompat.requestedDistanceBlocks();
         }
-        if (worldTicks==80) { client.player.connection.sendCommand("gamemode spectator"); client.player.connection.sendCommand("tp @s 0 140 0 0 20"); client.player.connection.sendCommand("time set noon"); }
+        if (worldTicks==80) { client.player.connection.sendCommand("gamemode spectator"); client.player.connection.sendCommand("execute in minecraft:overworld run tp @s 0 140 0 0 20"); client.player.connection.sendCommand("time set noon"); }
         if (worldTicks==80 && STATIC_WATER) CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(0f);
         if (worldTicks==80 && CLEAN_WATER) {
             CausticaConfig.Rt.Composite.CLOUDS.set(false);
@@ -351,6 +351,12 @@ public final class GysfSmokeClient implements ClientModInitializer {
                 if(maxNearWaterInstances==0 || maxLodWaterInstances==0 || packed<2)
                     throw new IllegalStateException("Finite water was not published in both near and LOD TLAS inputs");
                 System.out.println("GYSF_FINITE_WATER: nearChildren="+maxNearWaterInstances+" lodChildren="+maxLodWaterInstances+" packedPeak="+packed);
+                if(dev.comfyfluffy.caustica.compat.VoxyWaterDomain.supported()) {
+                    var fields=RtComposite.INSTANCE.waterFieldStatistics();
+                    if(fields.uploads()==0||fields.knownNodes()==0||fields.available()==0||fields.liveBytes()==0)
+                        throw new IllegalStateException("Canonical water field did not reach GPU residency: "+fields);
+                    System.out.println("GYSF_WATER_FIELD: PASS "+fields);
+                }
             }
             if(WATER_FIXTURE && lod.waterQuadCount()==0) throw new IllegalStateException("Textured LOD water was not converted");
             if(Boolean.getBoolean("gysf.smoke.requirePreciseFluids") && lod.preciseFluidQuadCount()==0)

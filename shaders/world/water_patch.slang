@@ -86,6 +86,13 @@ public float intersectWaterPatch(WaterPatch patch,float3 ro,float3 rd,float time
     float lower,upper,curvature;patchBounds(patch,rd.xz,footprint,lower,upper,curvature);
     float lo=rayMin,hi=rayMax;work=0;exhausted=false;
     if(!patchInterval(patch,ro,rd,lower,upper,lo,hi))return -1.0;
+    return solveWaterPatchInterval(patch,ro,rd,time,footprint,lo,hi,curvature,work,exhausted);
+}
+
+// The caller has clipped the original primitive and this envelope's domain separately.
+public float solveWaterPatchInterval(WaterPatch patch,float3 ro,float3 rd,float time,float footprint,
+        float lo,float hi,float curvature,out uint work,out bool exhausted) {
+    work=0;exhausted=false;
     float t=lo,last=lo,sign=1.0;
     for(int i=0;i<512;i++) {
         float derivative,f=patchEquation(patch,ro,rd,t,time,footprint,derivative);work++;

@@ -57,6 +57,28 @@ final class RtWaterGeometryTest {
         assertTrue(data.aabbs()[4]>65538+RtWaterGeometry.MAX_DISPLACEMENT);
     }
 
+    @Test void sourceLayerIsSharedByBothHalvesAtFullCellAndNegativeHeights() {
+        for(float y:new float[]{0,1,-1,4096,65536}) {
+            float[] vertices=square();for(int i=1;i<vertices.length;i+=3)vertices[i]=y;
+            var data=RtWaterGeometry.pack(vertices,mainDiagonal(),0,2,null);
+            assertEquals(y-1,data.primitives()[11]);assertEquals(y-1,data.primitives()[31]);
+        }
+        float[] vertices={0,1.8f,0,0,2.2f,1,1,1.9f,1,1,1.8f,0};
+        var data=RtWaterGeometry.pack(vertices,mainDiagonal(),0,2,null);
+        assertEquals(2,data.primitives()[11]);assertEquals(2,data.primitives()[31]);
+    }
+
+    @Test void canonicalOwnerRequestsCrossTileEdgesWithSignedOrigins() {
+        var data=RtWaterGeometry.pack(square(),mainDiagonal(),0,2,null);
+        var keys=RtWaterFieldImage.domainTiles(data,-1,-16,15);
+        assertEquals(4,keys.length);
+        var owners=new it.unimi.dsi.fastutil.longs.LongOpenHashSet(keys);
+        for(int x:new int[]{-1,0})for(int z:new int[]{0,1})
+            assertTrue(owners.contains(dev.comfyfluffy.caustica.compat.VoxyWaterDomain.Tile.key(x,-15,z)));
+        var bottom=RtWaterGeometry.pack(square(),new int[]{0,2,1,0,3,2},0,2,null);
+        assertEquals(0,RtWaterFieldImage.domainTiles(bottom,0,0,0).length);
+    }
+
     @Test void malformedInputFailsBeforeNativeAllocation() {
         assertThrows(IllegalArgumentException.class,()->RtWaterGeometry.pack(square(),mainDiagonal(),0,1,null));
         assertThrows(IllegalArgumentException.class,()->RtWaterGeometry.pack(square(),mainDiagonal(),1,2,null));

@@ -6,7 +6,7 @@ reflection boundary, validates payloads/revisions, and keeps provider types out
 of the renderer's constant pool. Unsupported providers retain the existing
 geometry path.
 
-`RtWaterShoreField` is the CPU reference for the next GPU binding. It samples
+`RtWaterShoreField` is the CPU reference for the GPU binding. It samples
 uniquely owned nodes on a world-space unit lattice and derives weights from the
 available excursion and the current displacement bound. Integer world anchors
 preserve fractional positions through rebases and near the world border.
@@ -34,8 +34,9 @@ worktree; final source/artifact identities and logs belong under
 `artifacts/2026-10-16/water-domain/`. These figures qualify the source/export
 path running alongside RT, not a rendered shoreline fix or a performance gain.
 
-The GPU intersection and closest-hit paths still use their existing fully wet
-envelopes. Required next work is a bounded GPU tile lookup with previous-frame
-retention, canonical-cell traversal, shared intersection/normal/motion sampling,
-edited and mixed-LOD optical controls, and frame-time/guide readbacks. New water
-geometry remains off by default, and the player instance is unchanged.
+The subsequent [GPU integration](WATER-FIELD-GPU-2026-10-16.md) binds the common
+field for intersection, normals and previous-frame motion. The original
+source/export-only results above remain limited to their original scope.
+Edited and mixed-LOD optical controls, coarse rest topology, GPU guide/depth
+images and matched-scene frame time remain open. New water geometry remains
+off by default, and the player instance is unchanged.

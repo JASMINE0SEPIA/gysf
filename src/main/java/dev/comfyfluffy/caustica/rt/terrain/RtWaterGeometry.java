@@ -15,6 +15,7 @@ public final class RtWaterGeometry {
     public record Packed(float[] aabbs, float[] primitives, int topTriangles) {
         public int triangleCount() { return aabbs.length / AABB_FLOATS; }
         public long bytes() { return ((long)aabbs.length + primitives.length) * Float.BYTES; }
+
     }
 
     private RtWaterGeometry() {}
@@ -48,7 +49,7 @@ public final class RtWaterGeometry {
         for (int quad = 0; quad < quadCount; quad++) {
             int indexStart = (firstTriangle + quad * 2) * 3;
             float minX = Float.POSITIVE_INFINITY, minZ = minX;
-            float maxX = Float.NEGATIVE_INFINITY, maxZ = maxX;
+            float maxX = Float.NEGATIVE_INFINITY, maxZ = maxX,maxY=maxX;
             for (int corner = 0; corner < 6; corner++) {
                 int vertex = indices[indexStart + corner];
                 if (vertex < 0 || vertex >= positions.length / 3) {
@@ -62,6 +63,7 @@ public final class RtWaterGeometry {
                 }
                 minX = Math.min(minX, positions[offset]); maxX = Math.max(maxX, positions[offset]);
                 minZ = Math.min(minZ, positions[offset + 2]); maxZ = Math.max(maxZ, positions[offset + 2]);
+                maxY=Math.max(maxY,positions[offset+1]);
             }
             float width = maxX - minX, depth = maxZ - minZ;
             for (int half = 0; half < 2; half++) {
@@ -107,6 +109,9 @@ public final class RtWaterGeometry {
                     tops++;
                 }
                 primitives[target + 12] = minX; primitives[target + 13] = minZ;
+                // Shared by both halves, including nonplanar quads and exact full-cell tops.
+                // A fixed epsilon fails once the local float ULP exceeds that epsilon.
+                primitives[target+11]=(float)Math.floor(Math.nextDown(maxY));
                 primitives[target + 14] = width; primitives[target + 15] = depth;
                 for (int v = 0; v < 4; v++) {
                     primitives[target + 16 + v] = shoreWeights == null ? 1 : shoreWeights[quad * 4 + v];

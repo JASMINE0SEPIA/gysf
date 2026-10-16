@@ -728,6 +728,11 @@ public final class RtComposite {
     private float mvCamDeltaZ;
     private boolean mvHasPrev;
     private final RtWaterWaveClock waterWaveClock = new RtWaterWaveClock();
+    private final dev.comfyfluffy.caustica.rt.terrain.RtWaterFieldGpu waterField =
+            new dev.comfyfluffy.caustica.rt.terrain.RtWaterFieldGpu();
+    public dev.comfyfluffy.caustica.rt.terrain.RtWaterFieldGpu.Statistics waterFieldStatistics() {
+        return waterField.statistics();
+    }
     private int waterWaveOriginX, waterWaveOriginZ;
     private double waterWaveBaseSeconds;
     private float waterWaveCachedSpeed;
@@ -1676,6 +1681,7 @@ public final class RtComposite {
             // Reducing world coordinates modulo 4096 changes the incommensurate wave field at that
             // boundary. Transport each wave's full-origin phase instead; shader positions stay local.
             Float4 waterAnchor = new Float4(waveFrame.currentTime(), 0f, waveFrame.previousTime(), 0f);
+            var waterFields=waterField.frame(ctx,terrain,camX,camY,camZ,graphicsUse,graphicsUseWaiter);
 
             // Rebuild the TLAS this frame from static section instances merged with dynamic entity
             // instances, bind it into the pipeline's descriptor ring, record the build, then barrier so
@@ -1725,6 +1731,7 @@ public final class RtComposite {
                     sky.moonUv(),
                     waterParams,
                     waterAnchor,
+                    waterFields.current(),waterFields.previous(),
                     new Int4((flags&1)^(RtWaterCameraProbe.validationEnabled()
                             && Boolean.getBoolean("gysf.rt.testInvertCameraHint") ? 1 : 0),
                             0,Float.floatToRawIntBits(-1f),Float.floatToRawIntBits(-1f)),
@@ -2767,6 +2774,7 @@ public final class RtComposite {
         // Teardown runs after the device is idle (CLIENT_STOPPING waits), so the TLAS ring's slots are no
         // longer in flight and can be freed immediately.
         tlasRing.destroy();
+        waterField.destroy();
         sharc.destroy(RtContext.currentOrNull());
         // Unconditional: RtDlssRr.enabled() reflects the CURRENT toggles, and the denoiser toggle can
         // have been turned off after a feature was already created. destroy() is a no-op when nothing

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync)
+param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync,[switch]$RequireWaterField)
 $ErrorActionPreference='Stop'
 $content=Get-Content -LiteralPath $Path -Raw
 $validation='VUID-[A-Za-z0-9_-]+|SYNC-HAZARD|\b(?:WRITE|READ)[_-]AFTER[_-](?:WRITE|READ)\b|hazard detected|Validation Error'
@@ -11,6 +11,11 @@ if($content -notmatch 'GYSF_(SMOKE|PERF): PASS') {throw "Missing smoke/performan
 $shutdowns=[regex]::Matches($content,'RT LOD native shutdown: live=(\d+) bytes')
 if($shutdowns.Count -eq 0 -or ($shutdowns | Where-Object { [long]$_.Groups[1].Value -ne 0 })) {
     throw "Missing or nonzero native LOD shutdown in $Path"
+}
+$fieldShutdowns=[regex]::Matches($content,'Water field GPU shutdown: live=(\d+) bytes')
+if($fieldShutdowns | Where-Object {[long]$_.Groups[1].Value -ne 0}) {throw "Nonzero water field shutdown in $Path"}
+if($RequireWaterField -and ($fieldShutdowns.Count -eq 0 -or $content -notmatch 'GYSF_WATER_FIELD: PASS')) {
+    throw "Missing GPU water field residency/shutdown qualification in $Path"
 }
 if($RequireNgxClearSync -and ($content -notmatch 'Vulkan clear synchronized: call=' -or $content -notmatch 'DLSS-RR feature created:')) {
     throw "NGX synchronization fix was not exercised by a live RR feature in $Path"

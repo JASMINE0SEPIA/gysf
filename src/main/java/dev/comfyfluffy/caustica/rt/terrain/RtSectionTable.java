@@ -209,11 +209,13 @@ final class RtSectionTable {
         final int sz;
         /** Packed section-local RIS light records (possibly empty); flattened at publish. */
         final float[] lights;
+        final long[] waterDomainTiles;
         int slot = -1;
         int instanceIndex = -1;
 
         SectionGeom(long key, RtBuffer uvs, RtBuffer material,
-                    RtAccel blas, RtBuffer water, RtAccel waterBlas, int[] triBase, int sx, int sy, int sz, float[] lights) {
+                    RtAccel blas, RtBuffer water, RtAccel waterBlas, int[] triBase, int sx, int sy, int sz, float[] lights,
+                    long[] waterDomainTiles) {
             this.key = key;
             this.uvs = uvs;
             this.material = material;
@@ -224,6 +226,7 @@ final class RtSectionTable {
             this.sy = sy;
             this.sz = sz;
             this.lights = lights;
+            this.waterDomainTiles=waterDomainTiles;
         }
 
         void destroy() {

@@ -6,7 +6,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Blocks;
 
-/** Source field export and owned canonical sampling; this does not enable GPU shoreline binding. */
+/** Source/export checks only. The separate finite-water gate owns GPU field binding and its checks. */
 final class WaterDomainSmokeProbe {
     static final boolean ENABLED=Boolean.getBoolean("gysf.smoke.waterDomain");
     private static final int[] REQUESTS={3,176,2, 3,176,3, 4,176,2, 4,176,3, 2,176,0, 4,175,3, 4096,176,4096};

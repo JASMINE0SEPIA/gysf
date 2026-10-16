@@ -285,6 +285,11 @@ public final class RtDistantHorizonsTerrain {
         return count;
     }
 
+    public void collectWaterDomainTiles(java.util.function.LongConsumer target) {
+        if(current!=null)for(var entry:current.entries)
+            for(long owner:entry.geom.waterDomainTiles)target.accept(owner);
+    }
+
     /** Render-thread view; pending replacements have not incurred their full resident memory yet. */
     public boolean hasPendingBuilds() {
         synchronized(activeLock) {
@@ -1064,7 +1069,7 @@ public final class RtDistantHorizonsTerrain {
             RtSectionTable.SectionGeom geom = new RtSectionTable.SectionGeom(item.batchKey, prepared.uvs(),
                     prepared.material(), prepared.blas().accel, prepared.water(),
                     prepared.waterBlas()!=null ? prepared.waterBlas().accel : null, prepared.triBase(),
-                    prepared.sx(), prepared.sy(), prepared.sz(), prepared.lights());
+                    prepared.sx(), prepared.sy(), prepared.sz(), prepared.lights(),prepared.waterDomainTiles());
             GeomEntry entry = new GeomEntry(item.batchKey, item.sourceKey, item.sourceVersion,
                     item.originX, item.originZ, item.sourceWidth, item.dataPointWidth, item.volume, geom);
             session.acceptEntry(entry);

@@ -35,7 +35,7 @@ struct Runner {
         if(severity&VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) static_cast<Runner*>(user)->errors++;
         std::cerr<<"VULKAN_VALIDATION: "<<data->pMessage<<'\n';return VK_FALSE;
     }
-    void init(uint32_t count,const std::string& domainFile,const std::array<std::string,2>& shaders,bool trace=false) {
+    void init(uint32_t count,const std::string& domainFile,const std::array<std::string,2>& shaders,bool trace=false,bool deviceAddress=false) {
         tracing=trace;if(trace)shaderStages=VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
         const char* layer="VK_LAYER_KHRONOS_validation";
         uint32_t layerCount=0;check(vkEnumerateInstanceLayerProperties(&layerCount,nullptr),"enumerate layers");
@@ -78,6 +78,12 @@ struct Runner {
         VkPhysicalDeviceAccelerationStructureFeaturesKHR acceleration{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
         VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayPipeline{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
         const char* rayExtensions[]={VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME};
+        if(deviceAddress&&!trace) {
+            VkPhysicalDeviceFeatures2 query{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};query.pNext=&bda;
+            vkGetPhysicalDeviceFeatures2(physical,&query);
+            if(!bda.bufferDeviceAddress)throw std::runtime_error("Buffer device address unavailable");
+            bda={VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};bda.bufferDeviceAddress=VK_TRUE;deviceInfo.pNext=&bda;
+        }
         if(trace) {
             uint32_t extensionCount=0;check(vkEnumerateDeviceExtensionProperties(physical,nullptr,&extensionCount,nullptr),"enumerate device extensions");
             std::vector<VkExtensionProperties> supported(extensionCount);check(vkEnumerateDeviceExtensionProperties(physical,nullptr,&extensionCount,supported.data()),"read device extensions");

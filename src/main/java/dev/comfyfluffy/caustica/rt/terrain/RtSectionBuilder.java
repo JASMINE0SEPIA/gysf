@@ -90,7 +90,8 @@ final class RtSectionBuilder {
                     ommInput, compactBlas, label + " BLAS");
             if(waterPacked!=null)waterBlas=RtAccel.prepareWaterBlas(ctx,waterBounds,waterPacked.triangleCount(),label+" water BLAS");
             return new PreparedSection(key, positions, indices, uvs, material, water, waterBounds, upload, blas, waterBlas,
-                    packed.triBase(), sox, soy, soz, packed.lights());
+                    packed.triBase(), sox, soy, soz, packed.lights(),
+                    waterPacked==null ? new long[0] : RtWaterFieldImage.domainTiles(waterPacked,sox,soy,soz));
         } catch (Throwable t) {
             destroyBlas(waterBlas);destroyBlas(blas);
             if (upload != null) upload.destroy();
@@ -156,7 +157,7 @@ final class RtSectionBuilder {
     record PreparedSection(long key, RtBuffer positions, RtBuffer indices, RtBuffer uvs,
                            RtBuffer material, RtBuffer water, RtBuffer waterBounds, RtBuffer upload,
                            RtAccel.PreparedBlas blas, RtAccel.PreparedBlas waterBlas, int[] triBase,
-                           int sx, int sy, int sz, float[] lights) {
+                           int sx, int sy, int sz, float[] lights,long[] waterDomainTiles) {
         void releaseUpload() {
             upload.destroy();
         }
@@ -179,7 +180,7 @@ final class RtSectionBuilder {
 
         PreparedSection withBlas(RtAccel.PreparedBlas replacement) {
             return new PreparedSection(key, positions, indices, uvs, material, water, waterBounds, upload, replacement, waterBlas,
-                    triBase, sx, sy, sz, lights);
+                    triBase, sx, sy, sz, lights,waterDomainTiles);
         }
     }
 }

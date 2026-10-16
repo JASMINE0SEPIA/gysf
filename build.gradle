@@ -259,6 +259,8 @@ def generateShaderRecords = tasks.register("generateShaderRecords", GenerateShad
 
 tasks.named("test", Test) {
 	useJUnitPlatform()
+	outputs.files(layout.buildDirectory.file("shader-test/water-field-current.bin"),
+			layout.buildDirectory.file("shader-test/water-field-previous.bin"))
 }
 
 sourceSets.main.java.srcDir(files(layout.buildDirectory.dir("generated/sources/shaderRecords")).builtBy(generateShaderRecords))

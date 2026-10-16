@@ -1,5 +1,7 @@
 import water_patch;
 import water;
+import water_field;
+import world_core;
 
 // RtWaterGeometry: five std430 float4 lanes, 80 bytes per water triangle. v0.w marks a free top;
 // v1.w is its projected half (including either quad diagonal). All other faces stay exact flat triangles.
@@ -29,8 +31,13 @@ public WaterWaves primitiveWaterWaves(WaterPrimitive primitive,float3 translatio
     if(primitive.v0.w!=0 && animated) {
         WaterPatch patch=primitiveWaterPatch(primitive,translation);
         float height,previousHeight;float2 gradient,previousGradient;
-        patchField(patch,position.xz,currentT,0.0,height,gradient);
-        patchField(patch,position.xz,previousT,0.0,previousHeight,previousGradient);
+        int sourceY=worldPush.sharcGridOrigin.y+int(translation.y)+int(primitive.v2.w);
+        WaterPatch current=worldPush.waterFieldAddr==0?patch:
+                canonicalWaterCell(patch,worldPush.waterFieldAddr,position.xz,sourceY);
+        WaterPatch previous=worldPush.waterPreviousFieldAddr==0?patch:
+                canonicalWaterCell(patch,worldPush.waterPreviousFieldAddr,position.xz,sourceY);
+        patchField(current,position.xz,currentT,0.0,height,gradient);
+        patchField(previous,position.xz,previousT,0.0,previousHeight,previousGradient);
         waves.normal=waterSurfaceNormal(restNormal,gradient);
         waves.previousNormal=waterSurfaceNormal(restNormal,previousGradient);
         waves.motionPrev=float3(0,height-previousHeight,0);
@@ -63,7 +70,11 @@ public float intersectWaterPrimitive(WaterPrimitive primitive,float3 translation
         out float2 bary,out uint work,out bool exhausted) {
     work=0;exhausted=false;
     if(primitive.v0.w==0||!animated)return flatWaterTriangle(primitive,translation,ro,rd,rayMin,rayMax,bary);
-    float t=intersectWaterPatch(primitiveWaterPatch(primitive,translation),ro,rd,time,footprint,rayMin,rayMax,work,exhausted);
+    WaterPatch patch=primitiveWaterPatch(primitive,translation);
+    int sourceY=worldPush.sharcGridOrigin.y+int(translation.y)+int(primitive.v2.w);
+    float t=worldPush.waterFieldAddr==0
+        ? intersectWaterPatch(patch,ro,rd,time,footprint,rayMin,rayMax,work,exhausted)
+        : intersectCanonicalWaterPatch(patch,sourceY,ro,rd,time,footprint,rayMin,rayMax,work,exhausted);
     bary=float2(0);
     if(t>=0) {
         float2 a=primitive.v0.xz+translation.xz,e1=primitive.v1.xz-primitive.v0.xz,e2=primitive.v2.xz-primitive.v0.xz,p=(ro+rd*t).xz-a;

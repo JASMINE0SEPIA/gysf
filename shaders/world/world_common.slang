@@ -87,6 +87,8 @@ public struct WorldPush {
     public float4   moonUv;           // vanilla current-moon-phase sprite atlas rect
     public float4   waterParams;      // xyz camera-biome water tint, w portal/glint animation time (wrapped s)
     public float4   waterAnchor;      // x current / z previous wave seconds relative to the same 8 s base
+    public uint64_t waterFieldAddr;   // immutable canonical current field, 0 for legacy providers
+    public uint64_t waterPreviousFieldAddr;
     public uint4    waterCamera;      // x submerged:1 / perspective-probed:2; y diagnostics; zw hit distances as uint
     public WaterWaveDomain waterWaveDomains[7]; // CPU origin phases, evaluated with rebased hit coordinates
     public float4x4 curViewProj;      // forward camera-relative view-projection
