@@ -58,7 +58,10 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private java.util.concurrent.CompletableFuture<?> fluidMipReady;
     private final WaterSequenceCapture waterSequence=new WaterSequenceCapture();
     private final WaterCameraCapture waterCamera=new WaterCameraCapture();
+    private final WaterDomainSmokeProbe waterDomain=new WaterDomainSmokeProbe();
     @Override public void onInitializeClient() {
+        if(WaterDomainSmokeProbe.ENABLED && !FLUID_MIP)
+            throw new IllegalStateException("Water domain probe needs the isolated fluid-mip pool");
         if(FLUID_MIP && (!CLEAN_WATER || !WATER_COMPARE || FLUID_TOPOLOGY || FLUID_TOPOLOGY_EDITS
                 || WaterCameraCapture.ENABLED || WaterSequenceCapture.ENABLED))
             throw new IllegalStateException("Fluid mip probe needs its own clean-water comparison run");
@@ -321,9 +324,11 @@ public final class GysfSmokeClient implements ClientModInitializer {
                 image->{try {image.writeToFile(Path.of("screenshots","gysf-motion-return.png"));} catch(Exception e){throw new RuntimeException(e);} finally {image.close();}});
         waterSequence.sample(client,worldTicks);
         waterCamera.sample(client,worldTicks);
+        waterDomain.tick(client,worldTicks);
         if (worldTicks==(WATER_COMPARE?(WaterCameraCapture.ENABLED?1970:FLUID_TOPOLOGY_EDITS?1550:WaterSequenceCapture.ENABLED?1580:1290):WATER_MATRIX?1720:VISUAL_ONLY?990:MOTION?2900:2200)) {
             waterSequence.verify();
             waterCamera.verify();
+            waterDomain.verify();
             if(!VISUAL_ONLY && !WATER_COMPARE && !(CLEAN_WATER && WATER_MATRIX)) {
                 if (reload==null || !reload.isDone()) throw new IllegalStateException("Resource reload incomplete");
                 reload.join();
