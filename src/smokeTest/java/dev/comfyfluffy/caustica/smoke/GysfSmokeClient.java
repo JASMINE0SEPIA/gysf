@@ -20,7 +20,8 @@ import java.nio.file.*;
 public final class GysfSmokeClient implements ClientModInitializer {
     private static final boolean CLEAN_WATER=Boolean.getBoolean("gysf.smoke.cleanWater");
     private static final boolean PERFORMANCE=Boolean.getBoolean("gysf.smoke.performance");
-    private static final String WORLD=Boolean.getBoolean("gysf.smoke.fluidMip")?"gysf-fluid-mip-26.3"
+    private static final String WORLD=dev.comfyfluffy.caustica.rt.terrain.WaterSourceSmokeProbe.ENABLED?"gysf-water-source-26.3"
+            :Boolean.getBoolean("gysf.smoke.fluidMip")?"gysf-fluid-mip-26.3"
             :CLEAN_WATER?"gysf-clean-water-26.3":"gysf-26.3-smoke";
     private static final boolean TEXTURE_FIXTURE=Boolean.getBoolean("gysf.smoke.textureFixture");
     private static final boolean WATER_MATRIX=Boolean.getBoolean("gysf.smoke.waterMatrix");
@@ -61,6 +62,9 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private final WaterDomainSmokeProbe waterDomain=new WaterDomainSmokeProbe();
     private final WaterGuideCapture waterGuides=new WaterGuideCapture();
     @Override public void onInitializeClient() {
+        if(dev.comfyfluffy.caustica.rt.terrain.WaterSourceSmokeProbe.ENABLED&&(!CLEAN_WATER||!WATER_COMPARE||FLUID_MIP
+                ||FLUID_TOPOLOGY||WATER_MATRIX||PERFORMANCE||WaterCacheLifecycle.ENABLED||WaterGuideCapture.ENABLED||WaterCameraCapture.ENABLED||WaterSequenceCapture.ENABLED))
+            throw new IllegalStateException("Source capture requires its own clean comparison world");
         if(WaterGuideCapture.ENABLED&&(!CLEAN_WATER||!WATER_COMPARE||FLUID_MIP||FLUID_TOPOLOGY||WATER_MATRIX
                 ||WaterCameraCapture.ENABLED||WaterSequenceCapture.ENABLED||!dev.comfyfluffy.caustica.rt.RtGuideCapture.enabled()))
             throw new IllegalStateException("Water guides require a separate clean comparison and raw readback enabled");
@@ -107,6 +111,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
         }
         if (client.level==null || client.player==null) return;
         worldTicks++;
+        dev.comfyfluffy.caustica.rt.terrain.WaterSourceSmokeProbe.tick(client,worldTicks);
         if(WaterCacheLifecycle.ENABLED) {
             if(WaterCacheLifecycle.tick(client,worldTicks)){finished=true;client.disconnectWithSavingScreen();}
             return;
@@ -338,6 +343,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
         waterDomain.tick(client,worldTicks);
         if (worldTicks==(WATER_COMPARE?(WaterGuideCapture.ENABLED?WaterGuideCapture.END_TICK:WaterCameraCapture.ENABLED?1970:FLUID_TOPOLOGY_EDITS?1550:WaterSequenceCapture.ENABLED?1580:1290):WATER_MATRIX?1720:VISUAL_ONLY?990:MOTION?2900:2200)) {
             waterGuides.verify();
+            dev.comfyfluffy.caustica.rt.terrain.WaterSourceSmokeProbe.verify();
             waterSequence.verify();
             waterCamera.verify();
             waterDomain.verify();

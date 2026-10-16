@@ -180,6 +180,10 @@ recorded run also set `VK_KHRONOS_VALIDATION_VALIDATE_SYNC=true`.
 
 ## Repeat and remaining acceptance
 
+The follow-up [actual provider source and edge validation](WATER-SOURCES-2026-10-16.md) now
+passes with real L0-L4 packets and canonical data on CPU/Vulkan compute. It remains separate
+from the full-game varying-height optics and active-ownership acceptance below.
+
 After `gradlew test` has exported the canonical field images, with Java 25/Vulkan SDK staged and
 no other Minecraft process running:
 
