@@ -72,11 +72,12 @@ for phase, rows in sorted(groups.items()):
             "fps": 1000 / statistics.mean(intervals)}
     render_keys = ("quality", "renderWidth", "renderHeight", "displayWidth", "displayHeight", "filter", "spp", "bounces", "finiteWater", "omm", "nearPending", "lodPending")
     item["renderEvidence"] = all(k in rows[0] for k in render_keys)
-    if "waterShader" in rows[0]:
-        shaders = {r["waterShader"] for r in rows}
-        if len(shaders) != 1:
-            raise SystemExit("INVALID: shader changed inside measured phase")
-        item["waterShader"] = next(iter(shaders))
+    for column in ("waterShader", "waterHitShader"):
+        if column in rows[0]:
+            shaders = {r[column] for r in rows}
+            if len(shaders) != 1:
+                raise SystemExit("INVALID: shader changed inside measured phase")
+            item[column] = next(iter(shaders))
     if item["renderEvidence"]:
         for key in render_keys:
             if len({r[key] for r in rows}) != 1:
@@ -166,6 +167,22 @@ if metadata and metadata.get("waterShaderBaseline"):
         raise SystemExit("INVALID: shader A/B requires matching recorded render settings")
     report["shaderComparison"] = {"baseline": baseline_hash, "candidates": sorted(candidates), "sequence": sequence,
                                  "orderValidated": True, "settingsMatched": True}
+    if metadata.get("waterHitShaderBaseline"):
+        hit_baseline = metadata.get("waterHitShaderBaselineSha256")
+        if not hit_baseline:
+            hit_baseline = hashlib.sha256(Path(metadata["waterHitShaderBaseline"]).read_bytes()).hexdigest()
+        hit_candidates = set()
+        for item, variant in zip(report["phases"], sequence):
+            shader = item.get("waterHitShader", "")
+            if len(shader) != 64 or any(c not in "0123456789abcdef" for c in shader):
+                raise SystemExit("INVALID: missing actual hit-stage shader identity")
+            if variant == 0 and shader != hit_baseline:
+                raise SystemExit("INVALID: actual hit-stage baseline shader does not match")
+            if variant:
+                hit_candidates.add(shader)
+        if len(hit_candidates) > 1:
+            raise SystemExit("INVALID: hit-stage candidate shader changed between phases")
+        report["shaderComparison"]["hitStage"] = {"baseline": hit_baseline, "candidates": sorted(hit_candidates)}
 report["selectedGeometryStable"] = bool(included) and all(item["geometryStable"] for item in included) and all(
     len({tuple(item[k]) for item in included}) == 1 for k in ("nearInstances", "lodSections")) and len({item["nearRadius"] for item in included})==1
 report["selectedSceneVersionsStable"] = bool(included) and all(item.get("versionsStable", False) for item in included)

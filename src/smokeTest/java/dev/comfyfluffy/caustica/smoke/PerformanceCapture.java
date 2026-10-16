@@ -59,7 +59,7 @@ public final class PerformanceCapture {
             try { Files.createDirectories(output); }
             catch(IOException e){throw new UncheckedIOException(e);}
             if(Files.exists(output.resolve("frames.csv")))throw new IllegalStateException("Fresh performance label required");
-            rows.append("phase,rr,preset,elapsedMs,intervalMs,rtFrame,processBytes,budgetBytes,rtAllocationBytes,lodBytes,providerBytes,nearRadius,nearInstances,lodSections,deferrals,cameraX,cameraY,cameraZ,yaw,pitch,screen,lodRevision,texturedBuilds,atomicSwaps,nearTable,nearBuildToken,quality,renderWidth,renderHeight,displayWidth,displayHeight,filter,spp,bounces,finiteWater,omm,nearPending,lodPending,waterUploads,waterKnownNodes,waterPending,waterShader\n");
+            rows.append("phase,rr,preset,elapsedMs,intervalMs,rtFrame,processBytes,budgetBytes,rtAllocationBytes,lodBytes,providerBytes,nearRadius,nearInstances,lodSections,deferrals,cameraX,cameraY,cameraZ,yaw,pitch,screen,lodRevision,texturedBuilds,atomicSwaps,nearTable,nearBuildToken,quality,renderWidth,renderHeight,displayWidth,displayHeight,filter,spp,bounces,finiteWater,omm,nearPending,lodPending,waterUploads,waterKnownNodes,waterPending,waterShader,waterHitShader\n");
             // A non-RR control must not silently inherit another vendor filter/upscaler or FG.
             CausticaConfig.Rt.Fsr.ENABLED.set(false);CausticaConfig.Rt.Xess.ENABLED.set(false);
             CausticaConfig.Rt.Fg.ENABLED.set(false);CausticaConfig.Rt.Nrd.ENABLED.set(false);
@@ -182,7 +182,8 @@ public final class PerformanceCapture {
                 .append(info.filter()).append(',').append(CausticaConfig.Rt.Composite.SPP.value()).append(',').append(CausticaConfig.Rt.Composite.MAX_BOUNCES.value()).append(',')
                 .append(RtWaterGeometry.runtimeEnabled()).append(',').append(RtDeviceBringup.ommEnabled()).append(",false,false,")
                 .append(water.uploads()).append(',').append(water.knownNodes()).append(',').append(water.pending()).append(',')
-                .append(WaterShaderComparison.measuredFingerprint(rtFrame)).append('\n');
+                .append(WaterShaderComparison.measuredFingerprint(rtFrame)).append(',')
+                .append(WaterShaderComparison.measuredHitFingerprint(rtFrame)).append('\n');
     }
 
     public static boolean locked() {

@@ -38,6 +38,20 @@ public float waterNodeWeight(uint word) {
     return (word&65536u)==0||bound==0?0.0:min(float(word&65535u)*(3.0/65535.0)/bound,1.0);
 }
 public float4 waterCellWeights(uint64_t address,int2 worldCell,int sourceY) {
+    // Interior cell corners share one owner. Gather its four adjacent words after one
+    // table lookup; edge strips retain the independent-owner path below.
+    if(all((worldCell&15)<15)) {
+        int2 owner=worldCell>>4;
+        uint entry=waterTileEntry(address,int3(owner.x,sourceY,owner.y));
+        if(entry==0)return float4(0);
+        uint data=fieldWord(address,entry+3);
+        if(fieldWord(address,entry+4)!=0)return float4(waterNodeWeight(fieldWord(address,data)));
+        uint index=uint((worldCell.y&15)*16+(worldCell.x&15));
+        return float4(waterNodeWeight(fieldWord(address,data+index)),
+                waterNodeWeight(fieldWord(address,data+index+16)),
+                waterNodeWeight(fieldWord(address,data+index+1)),
+                waterNodeWeight(fieldWord(address,data+index+17)));
+    }
     return float4(waterNodeWeight(waterNodeWord(address,worldCell,sourceY)),
         waterNodeWeight(waterNodeWord(address,worldCell+int2(0,1),sourceY)),
         waterNodeWeight(waterNodeWord(address,worldCell+int2(1,0),sourceY)),

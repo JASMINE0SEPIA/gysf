@@ -14,33 +14,38 @@ import java.util.*;
 /** Smoke-only A/B pipelines: immutable scene, descriptors and material epoch stay owned by the original. */
 public final class WaterShaderComparison {
     private static final String BASELINE=System.getProperty("gysf.smoke.waterShaderBaseline","");
+    private static final String HIT_BASELINE=System.getProperty("gysf.smoke.waterHitShaderBaseline","");
+    private static final String INTERSECTION="/caustica/rt/world_water.rint.spv",HIT="/caustica/rt/world.rchit.spv";
     public static final boolean ENABLED=!BASELINE.isBlank();
     private static final int[] SEQUENCE=Arrays.stream(System.getProperty("gysf.smoke.waterShaderSequence","0").split(","))
             .mapToInt(Integer::parseInt).toArray();
     private static RtPipeline original,alternate;
     private static boolean creatingAlternate;
-    private static byte[] baselineBytes;
-    private static String baselineHash,candidateHash;
+    private record Module(byte[] bytes,String hash) {}
+    private static final Map<String,Module> baselines=new HashMap<>();
+    private static final Map<String,String> candidates=new HashMap<>();
     private static int variant,switches,pipelineSeen=-1,sbtSeen=-1;
     private static long observedFrame=-1;
 
     public static InputStream shaderStream(Class<?> loader,String name) {
-        if(!ENABLED || !name.equals("/caustica/rt/world_water.rint.spv"))return loader.getResourceAsStream(name);
+        String path=name.equals(INTERSECTION)?BASELINE:name.equals(HIT)?HIT_BASELINE:"";
+        if(!ENABLED || path.isBlank())return loader.getResourceAsStream(name);
         if(!Boolean.getBoolean("gysf.smoke.performance") || !RtWaterGeometry.runtimeEnabled())
             throw new IllegalStateException("Water shader comparison requires finite-water performance mode");
         try {
-            if(baselineBytes==null) {
-                baselineBytes=Files.readAllBytes(Path.of(BASELINE));
-                if(baselineBytes.length<20||baselineBytes.length%4!=0||java.nio.ByteBuffer.wrap(baselineBytes)
+            Module baseline=baselines.get(name);
+            if(baseline==null) {
+                byte[] bytes=Files.readAllBytes(Path.of(path));
+                if(bytes.length<20||bytes.length%4!=0||java.nio.ByteBuffer.wrap(bytes)
                         .order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt()!=0x07230203)
                     throw new IllegalArgumentException("Invalid baseline SPIR-V");
-                baselineHash=hash(baselineBytes);
+                baseline=new Module(bytes,hash(bytes));baselines.put(name,baseline);
             }
-            if(!creatingAlternate)return new ByteArrayInputStream(baselineBytes);
+            if(!creatingAlternate)return new ByteArrayInputStream(baseline.bytes());
             try(var input=loader.getResourceAsStream(name)) {
                 if(input==null)throw new IllegalStateException("Candidate water shader is missing");
-                byte[] bytes=input.readAllBytes();candidateHash=hash(bytes);
-                if(candidateHash.equals(baselineHash))throw new IllegalStateException("A/B water shaders are identical");
+                byte[] bytes=input.readAllBytes();String candidate=hash(bytes);candidates.put(name,candidate);
+                if(name.equals(INTERSECTION)&&candidate.equals(baseline.hash()))throw new IllegalStateException("A/B water shaders are identical");
                 return new ByteArrayInputStream(bytes);
             }
         } catch(IOException e){throw new UncheckedIOException(e);}
@@ -64,7 +69,8 @@ public final class WaterShaderComparison {
             for(String key:List.of("sbtStride","raygenCount","missCount","hitGroupCount","pushConstantSize",
                     "pushConstantStages","firstExtraBinding","skyAtlasBinding"))
                 if(!field(original,key).equals(field(alternate,key)))throw new IllegalStateException("A/B layout mismatch: "+key);
-            System.out.println("GYSF_SHADER_COMPARE: ready baseline="+baselineHash+" candidate="+candidateHash);
+            System.out.println("GYSF_SHADER_COMPARE: ready baseline="+baselines.get(INTERSECTION).hash()+" candidate="+candidates.get(INTERSECTION)
+                    +" hitBaseline="+moduleFingerprint(HIT,0)+" hitCandidate="+moduleFingerprint(HIT,1));
         } finally {creatingAlternate=false;}
     }
 
@@ -101,7 +107,17 @@ public final class WaterShaderComparison {
             throw new IllegalStateException("Actual pipeline/SBT selection was not observed for measured frame");
         return fingerprint();
     }
-    private static String fingerprint(){return variant==0?baselineHash:candidateHash;}
+    public static String measuredHitFingerprint(long frame) {
+        measuredFingerprint(frame);
+        return moduleFingerprint(HIT,variant);
+    }
+    private static String moduleFingerprint(String name,int selected) {
+        if(name.equals(HIT)&&HIT_BASELINE.isBlank())return "shared";
+        String value=selected==0?baselines.get(name).hash():candidates.get(name);
+        if(value==null)throw new IllegalStateException("Compared shader was not loaded: "+name);
+        return value;
+    }
+    private static String fingerprint(){return moduleFingerprint(INTERSECTION,variant);}
 
     public static void destroy() {
         if(alternate==null)return;
