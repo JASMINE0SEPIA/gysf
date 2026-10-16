@@ -72,7 +72,7 @@ for phase, rows in sorted(groups.items()):
             "fps": 1000 / statistics.mean(intervals)}
     render_keys = ("quality", "renderWidth", "renderHeight", "displayWidth", "displayHeight", "filter", "spp", "bounces", "finiteWater", "omm", "nearPending", "lodPending")
     item["renderEvidence"] = all(k in rows[0] for k in render_keys)
-    for column in ("waterShader", "waterHitShader"):
+    for column in ("waterShader", "waterHitShader", "anyHitShader"):
         if column in rows[0]:
             shaders = {r[column] for r in rows}
             if len(shaders) != 1:
@@ -93,6 +93,11 @@ for phase, rows in sorted(groups.items()):
             raise SystemExit("INVALID: unexpected actual filter")
         if item["nearPending"] != "false" or item["lodPending"] != "false":
             raise SystemExit("INVALID: geometry work during measurement")
+        if "opaqueAlphaQuads" in rows[0]:
+            values = {int(r["opaqueAlphaQuads"]) for r in rows}
+            if len(values) != 1 or min(values) < 0:
+                raise SystemExit("INVALID: exact-alpha geometry changed during measurement")
+            item["opaqueAlphaQuads"] = next(iter(values))
         for key in ("quality", "renderWidth", "renderHeight", "displayWidth", "displayHeight", "spp", "bounces"):
             item[key] = int(item[key])
         if min(item[k] for k in ("renderWidth", "renderHeight", "displayWidth", "displayHeight", "spp", "bounces")) <= 0:
@@ -201,6 +206,29 @@ if metadata and metadata.get("waterShaderBaseline"):
         if len(hit_candidates) > 1:
             raise SystemExit("INVALID: hit-stage candidate shader changed between phases")
         report["shaderComparison"]["hitStage"] = {"baseline": hit_baseline, "candidates": sorted(hit_candidates)}
+if metadata and metadata.get("anyHitShaderBaseline"):
+    baseline_hash = metadata.get("anyHitShaderBaselineSha256") or hashlib.sha256(Path(metadata["anyHitShaderBaseline"]).read_bytes()).hexdigest()
+    sequence = [int(v) for v in metadata["anyHitShaderSequence"].split(",")]
+    if len(sequence) == 1:
+        sequence *= len(report["phases"])
+    if len(sequence) != len(report["phases"]) or set(sequence) != {0, 1}:
+        raise SystemExit("INVALID: any-hit comparison requires both variants in the recorded order")
+    candidates = set()
+    for item, variant in zip(report["phases"], sequence):
+        shader = item.get("anyHitShader", "")
+        if len(shader) != 64 or any(c not in "0123456789abcdef" for c in shader) or (shader == baseline_hash) != (variant == 0):
+            raise SystemExit("INVALID: actual any-hit shader does not match requested order")
+        item["anyHitVariant"] = variant
+        if variant:
+            candidates.add(shader)
+        if item.get("opaqueAlphaQuads", 0) <= 0:
+            raise SystemExit("INVALID: no exact-alpha tagged geometry in the scene")
+    fixed = ("preset", "quality", "renderWidth", "renderHeight", "displayWidth", "displayHeight", "filter", "spp", "bounces",
+             "finiteWater", "omm", "waterShader", "waterHitShader", "opaqueAlphaQuads")
+    if len(candidates) != 1 or any(any(k not in item for item in report["phases"]) or len({item[k] for item in report["phases"]}) != 1 for k in fixed):
+        raise SystemExit("INVALID: any-hit A/B changed other physical/render inputs")
+    report["anyHitComparison"] = {"baseline": baseline_hash, "candidates": sorted(candidates), "sequence": sequence,
+                                  "orderValidated": True, "settingsMatched": True}
 if metadata and (metadata.get("compareWaterBounds") or metadata.get("compareWaterCache")):
     sequence = [int(v) for v in metadata["waterBoundsSequence"].split(",")]
     if len(sequence) == 1:

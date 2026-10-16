@@ -16,9 +16,11 @@ param(
     [ValidatePattern('^[01](?:,[01])*$')][string]$WaterBoundsSequence='0,1,1,0',
     [string]$WaterShaderBaseline='',
     [string]$WaterHitShaderBaseline='',
+    [string]$AnyHitShaderBaseline='',
+    [ValidatePattern('^[01](?:,[01])*$')][string]$AnyHitShaderSequence='0,1,1,0',
     [ValidatePattern('^[01](?:,[01])*$')][string]$WaterShaderSequence='0',
     [string]$Label=('perf-'+(Get-Date -Format 'yyyyMMdd-HHmmss')),
-    [string]$ProviderJar='../voxy-vulkan-26.3/build/libs/voxy-vulkan-0.2.20-26.3-vulkan.11-dev-15ff198.jar'
+    [string]$ProviderJar='../voxy-vulkan-26.3/build/libs/voxy-vulkan-0.2.20-26.3-vulkan.12-dev-cf3e16a.jar'
 )
 $ErrorActionPreference='Stop'
 if($Label -notmatch '^[A-Za-z0-9_-]+$'){throw 'Use a simple unique output label'}
@@ -57,6 +59,13 @@ try {
         $taskFlags+="-Dgysf.smoke.waterBoundsSequence=$WaterBoundsSequence"
     }
     if($WaterHitShaderBaseline -and !$WaterShaderBaseline){throw 'Hit-stage comparison requires -WaterShaderBaseline'}
+    if($AnyHitShaderBaseline) {
+        if($WaterShaderBaseline -or $WaterHitShaderBaseline -or $CompareWaterBounds -or $CompareWaterCache){throw 'Compare any-hit independently of water variants'}
+        if($AnyHitShaderSequence.Split(',').Count -ne 1 -and $AnyHitShaderSequence.Split(',').Count -ne $Presets.Split(',').Count){throw 'Any-hit sequence count must match presets'}
+        $taskAnyBaseline=(Resolve-Path -LiteralPath $AnyHitShaderBaseline).Path
+        $taskFlags+='"-Dgysf.smoke.anyHitShaderBaseline='+$taskAnyBaseline+'"'
+        $taskFlags+="-Dgysf.smoke.anyHitShaderSequence=$AnyHitShaderSequence"
+    }
     if($WaterShaderBaseline) {
         if(!$FiniteWater){throw 'Shader comparison requires -FiniteWater'}
         if($WaterShaderSequence.Split(',').Count -ne 1 -and $WaterShaderSequence.Split(',').Count -ne $Presets.Split(',').Count){throw 'Shader sequence count must be one or match presets'}
@@ -94,13 +103,15 @@ try {
         waterShaderBaselineSha256=if($WaterShaderBaseline){(Get-FileHash -LiteralPath $taskBaseline).Hash.ToLowerInvariant()}else{''};
         waterHitShaderBaseline=if($WaterHitShaderBaseline){$taskHitBaseline}else{''};
         waterHitShaderBaselineSha256=if($WaterHitShaderBaseline){(Get-FileHash -LiteralPath $taskHitBaseline).Hash.ToLowerInvariant()}else{''};
+        anyHitShaderBaseline=if($AnyHitShaderBaseline){$taskAnyBaseline}else{''};anyHitShaderSequence=$AnyHitShaderSequence;
+        anyHitShaderBaselineSha256=if($AnyHitShaderBaseline){(Get-FileHash -LiteralPath $taskAnyBaseline).Hash.ToLowerInvariant()}else{''};
         settleSeconds=$SettleSeconds;measureSeconds=$MeasureSeconds
     } | ConvertTo-Json | Set-Content -LiteralPath "run-smoke/performance-smoke/$Label/run.json" -Encoding utf8
     if($NearMemoryPressure) {
         & (Join-Path $PSScriptRoot 'Assert-VulkanSmokeLog.ps1') -Path "$Label.log" -RequireNearPressure `
             -RequireWaterBoundsCache:($FiniteWater -and !$CompareWaterBounds -and !$DisableWaterBoundsCache -and $WaterBoundsCacheMiB -gt 0)
     }
-    if($WaterShaderBaseline -and !(Select-String -LiteralPath "$Label.log" -Pattern 'GYSF_SHADER_COMPARE: complete switches=\d+ liveAlternates=0' -Quiet)) {
+    if(($WaterShaderBaseline -or $AnyHitShaderBaseline) -and !(Select-String -LiteralPath "$Label.log" -Pattern 'GYSF_SHADER_COMPARE: complete switches=\d+ liveAlternates=0' -Quiet)) {
         throw 'Missing alternate-pipeline lifetime qualification'
     }
     if($CompareWaterBounds) {

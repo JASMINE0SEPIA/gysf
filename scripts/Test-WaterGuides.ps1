@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$OutputDir,
-    [string]$ProviderJar='../voxy-vulkan-26.3/build/libs/voxy-vulkan-0.2.20-26.3-vulkan.11-dev-15ff198.jar',
+    [string]$ProviderJar='../voxy-vulkan-26.3/build/libs/voxy-vulkan-0.2.20-26.3-vulkan.12-dev-cf3e16a.jar',
     [string]$PythonPath='C:/Python314/python.exe',
     [switch]$Optics,[switch]$Varied
 )

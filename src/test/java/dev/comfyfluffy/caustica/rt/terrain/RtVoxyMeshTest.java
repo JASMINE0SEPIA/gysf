@@ -76,6 +76,22 @@ final class RtVoxyMeshTest {
         assertEquals(24,maxX); assertEquals(4,maxU);
     }
 
+    @Test void onlyExactOpaqueCoverageAuthorizesSkippingTheLodAlphaLookup() {
+        for(boolean emission:new boolean[]{false,true}) {
+            var opaque=new VoxySceneData.Model(7,FULL|(1<<26),FULL|(1<<26),FULL|(1<<26),FULL|(1<<26),FULL|(1<<26),FULL|(1<<26),0,-1,null,false,false,false,emission?15:0);
+            var p=pack(source(new long[]{raw(1,7)},opaque));
+            assertEquals(128,Float.floatToRawIntBits(p.material()[9])&128);
+        }
+        // Missing proof, even without a raster cutout bit, must keep alpha lookup for old providers.
+        var old=pack(source(new long[]{raw(1,7)},model(7,FULL,false,false)));
+        assertEquals(0,Float.floatToRawIntBits(old.material()[9])&128);
+        for(boolean water:new boolean[]{false,true}) {
+            var optical=new VoxySceneData.Model(7,FULL|(1<<26),FULL|(1<<26),FULL|(1<<26),FULL|(1<<26),FULL|(1<<26),FULL|(1<<26),0,-1,null,water,water,!water,0);
+            var p=pack(source(new long[]{raw(1,7)},optical));
+            assertEquals(0,Float.floatToRawIntBits(p.material()[9])&128,"glass/water keep their optical path");
+        }
+    }
+
     @Test void zeroDepthAndFullDepthRemainExactCellBoundaries() {
         float[] p=new float[12],uv=new float[8];
         RtVoxyMesh.corners(raw(1,0),FULL,false,1,p,uv); assertEquals(1,p[1]);

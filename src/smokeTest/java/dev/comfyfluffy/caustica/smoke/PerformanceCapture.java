@@ -60,7 +60,7 @@ public final class PerformanceCapture {
             try { Files.createDirectories(output); }
             catch(IOException e){throw new UncheckedIOException(e);}
             if(Files.exists(output.resolve("frames.csv")))throw new IllegalStateException("Fresh performance label required");
-            rows.append("phase,rr,preset,elapsedMs,intervalMs,rtFrame,processBytes,budgetBytes,rtAllocationBytes,lodBytes,providerBytes,nearRadius,nearInstances,lodSections,deferrals,cameraX,cameraY,cameraZ,yaw,pitch,screen,lodRevision,texturedBuilds,atomicSwaps,nearTable,nearBuildToken,quality,renderWidth,renderHeight,displayWidth,displayHeight,filter,spp,bounces,finiteWater,omm,nearPending,lodPending,waterUploads,waterKnownNodes,waterPending,waterShader,waterHitShader,waterBoundsVariant,waterBoundsSource,waterBoundsChildren,waterWaveStrength,waterWaveSpeed,waterWaveCount,waterCacheSources,waterCacheReady,waterCachePending,waterCachePublished,waterCacheHits,waterCacheMisses,waterCacheInputDeferrals\n");
+            rows.append("phase,rr,preset,elapsedMs,intervalMs,rtFrame,processBytes,budgetBytes,rtAllocationBytes,lodBytes,providerBytes,nearRadius,nearInstances,lodSections,deferrals,cameraX,cameraY,cameraZ,yaw,pitch,screen,lodRevision,texturedBuilds,atomicSwaps,nearTable,nearBuildToken,quality,renderWidth,renderHeight,displayWidth,displayHeight,filter,spp,bounces,finiteWater,omm,nearPending,lodPending,waterUploads,waterKnownNodes,waterPending,waterShader,waterHitShader,waterBoundsVariant,waterBoundsSource,waterBoundsChildren,waterWaveStrength,waterWaveSpeed,waterWaveCount,waterCacheSources,waterCacheReady,waterCachePending,waterCachePublished,waterCacheHits,waterCacheMisses,waterCacheInputDeferrals,anyHitShader,opaqueAlphaQuads\n");
             // A non-RR control must not silently inherit another vendor filter/upscaler or FG.
             CausticaConfig.Rt.Fsr.ENABLED.set(false);CausticaConfig.Rt.Xess.ENABLED.set(false);
             CausticaConfig.Rt.Fg.ENABLED.set(false);CausticaConfig.Rt.Nrd.ENABLED.set(false);
@@ -196,7 +196,8 @@ public final class PerformanceCapture {
                 .append(CausticaConfig.Rt.Composite.WATER_WAVE_DETAIL.value()).append(',')
                 .append(cache.sources()).append(',').append(cache.ready()).append(',').append(cache.pending()).append(',')
                 .append(cache.published()).append(',').append(cache.hits()).append(',').append(cache.eligibleMisses()).append(',')
-                .append(cache.inputDeferrals()).append('\n');
+                .append(cache.inputDeferrals()).append(',').append(WaterShaderComparison.measuredAnyHitFingerprint(rtFrame)).append(',')
+                .append(lod.opaqueAlphaQuadCount()).append('\n');
     }
 
     public static boolean locked() {

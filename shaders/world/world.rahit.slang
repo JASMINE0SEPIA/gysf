@@ -114,6 +114,9 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
                 IgnoreHit();
                 return;
             }
+            // Exact full-tile alpha=1 promise, not the provider's raster coverage heuristic.
+            // Ownership and atlas availability were checked above; shading still samples in chit.
+            if ((pr.flags & 128u) != 0u && (dhSurface == DH_SURFACE_SOLID || dhSurface == DH_SURFACE_EMISSIVE)) return;
             // Water uses the same optical biome tint as the near fluid mesher, without a sprite
             // colour or alpha mask. Ordinary surfaces retain base-level alpha coverage.
             if (dhSurface != DH_SURFACE_WATER) {

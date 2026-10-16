@@ -302,6 +302,7 @@ public final class RtDistantHorizonsTerrain {
     public long leafCutoutQuadCount() { return RtVoxyMesh.LEAF_CUTOUT_QUADS.get(); }
     public long waterQuadCount() { return RtVoxyMesh.WATER_QUADS.get(); }
     public long preciseFluidQuadCount() { return RtVoxyMesh.PRECISE_FLUID_QUADS.get(); }
+    public long opaqueAlphaQuadCount() { return RtVoxyMesh.OPAQUE_ALPHA_QUADS.get(); }
     public long atomicVoxySwapCount() { return atomicVoxySwaps; }
     public long voxyReplacementSwapCount() { return voxyReplacementSwaps; }
     public long voxyCoverageCheckCount() { return voxyCoverageChecks; }
