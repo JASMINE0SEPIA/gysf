@@ -119,7 +119,7 @@ timestamps were off, and `cadenceQualified=true` for **this experimental candida
 The earlier unmodified-water partial observation (65.416 ms) lies between the two candidate Default
 observations. There is no demonstrated useful frame-time improvement, and Default/F differences are
 smaller than the repeated Default drift. The candidate shader changes have therefore been **rolled
-back**. `water_patch.slang` is restored to its pre-experiment source. The final source retains only the
+back**. `water_patch.slang` is restored to its pre-experiment source. The `806a752` checkpoint retains only the
 opt-in measurement tools and stricter evidence checks; it does not ship a claimed water speedup.
 
 The completed candidate has zero native LOD/water-field live bytes at shutdown and no Vulkan error
@@ -151,7 +151,10 @@ repeating its label/flags does not reproduce that abandoned candidate. Use fresh
 The log checker has 18 fixtures, including required timing samples, missing initialization, and live
 query-pool rejection. Its `-RequireGpuTimings` mode accepts both completed timing runs above.
 
-Next, measure normal-resolution finite-water GPU stages and solver work, then test reuse of
+Follow-up results and the subsequently retained root fixes are recorded in
+[WATER-SOLVER-2026-10-16.md](WATER-SOLVER-2026-10-16.md).
+
+Next at this checkpoint, measure normal-resolution finite-water GPU stages and solver work, then test reuse of
 ray-invariant wave bounds across canonical cells and elimination of repeated intersection work.
 Require matched field/geometry coverage and repeated before/after cadence before retaining an
 optimization. The full DLSS quality/native/SVGF matrix still needs a sufficiently long measurement

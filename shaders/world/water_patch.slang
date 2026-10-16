@@ -86,6 +86,9 @@ public float intersectWaterPatch(WaterPatch patch,float3 ro,float3 rd,float time
     float lower,upper,curvature;patchBounds(patch,rd.xz,footprint,lower,upper,curvature);
     float lo=rayMin,hi=rayMax;work=0;exhausted=false;
     if(!patchInterval(patch,ro,rd,lower,upper,lo,hi))return -1.0;
+    // Clipping already solved a zero-height envelope analytically. Re-evaluating its
+    // rounded root can exceed the residual tolerance on long rays and turn a hit into a miss.
+    if(lower==0.0&&upper==0.0)return lo;
     return solveWaterPatchInterval(patch,ro,rd,time,footprint,lo,hi,curvature,work,exhausted);
 }
 
@@ -103,7 +106,9 @@ public float solveWaterPatchInterval(WaterPatch patch,float3 ro,float3 rd,float 
             // A rounding-sized overshoot brackets the first crossing; refine within that bracket.
             float a=last,b=t;
             for(int j=0;j<16;j++) {
-                float mid=(a+b)*0.5,dummy,fm=patchEquation(patch,ro,rd,mid,time,footprint,dummy);work++;
+                float mid=(a+b)*0.5;
+                if(mid==a||mid==b)break;
+                float dummy,fm=patchEquation(patch,ro,rd,mid,time,footprint,dummy);work++;
                 if(sign*fm>0.0)a=mid;else b=mid;
             }
             return (a+b)*0.5;

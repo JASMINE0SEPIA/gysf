@@ -89,6 +89,7 @@ public float intersectCanonicalWaterPatch(WaterPatch original,int sourceY,float3
             float a=lo,b=end;
             float offset=dot(patch.normal,ro-patch.point)/patch.normal.y,rate=dot(patch.normal,rd)/patch.normal.y;
             if(!(upper==0&&rate==0)&&clipPatchLinear(offset-lower,rate,a,b)&&clipPatchLinear(upper-offset,-rate,a,b)) {
+                if(lower==0.0&&upper==0.0)return a;
                 uint cellWork;bool cellExhausted;
                 float hit=solveWaterPatchInterval(patch,ro,rd,time,footprint,a,b,curvature,cellWork,cellExhausted);
                 work+=cellWork;

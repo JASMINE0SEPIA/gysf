@@ -122,6 +122,38 @@ void fieldProbe(uint3 id:SV_DispatchThreadID) {
             WaterWaves waves=primitiveWaterWaves(primitive,float3(minimum.x,0,minimum.y),position,hit,true,time,time);
             if(length(waves.previousNormal-float3(0,1,0))>1e-6||abs(waves.motionPrev.y-position.y)>2e-5)failures++;
         }
+        if(r>=224) for(int distanceBand=0;distanceBand<3;distanceBand++) {
+            // Unknown distant cells are exactly flat. Their analytic root need not leave a
+            // sub-micrometre residual when multiplied back through float ray coordinates.
+            float side=(r&1)==0?1.0:-1.0;
+            float3 farOrigin=float3(.125,side*77.25,.375);
+            float slopeScale=distanceBand==0?1.0:distanceBand==1?16.0:128.0;
+            float3 farDirection=normalize(float3((r&2)==0?1.0:-1.0,
+                    -side*(.005+float(r-224)*.0001)*slopeScale,(r&4)==0?.37:-.37));
+            float expected=-farOrigin.y/farDirection.y;
+            float2 position=(farOrigin+farDirection*expected).xz;
+            patch.half=(r&8)==0?0:1;
+            patch.minimum=position-(patch.half==0?float2(12,4):float2(4,12));patch.extent=16;
+            uint n;bool outOfWork;
+            float farHit=intersectCanonicalWaterPatch(patch,175,farOrigin,farDirection,time,0,0,expected+100,n,outOfWork);
+            float ulp=asfloat(asuint(expected)+1u)-expected;
+            if(farHit<0||outOfWork||abs(farHit-expected)>2*ulp)failures++;
+            work+=n;
+            // The same flat plane through the ordinary patch route must agree, including both
+            // ray-limit endpoints. Clipping outside the ray or triangle must still reject it.
+            patch.shore=0;
+            float direct=intersectWaterPatch(patch,farOrigin,farDirection,time,0,0,expected+100,n,outOfWork);
+            if(direct<0||outOfWork||abs(direct-expected)>2*ulp)failures++;
+            float limited=intersectCanonicalWaterPatch(patch,175,farOrigin,farDirection,time,0,expected,expected,n,outOfWork);
+            if(limited<0||outOfWork||abs(limited-expected)>2*ulp)failures++;
+            float excluded=intersectCanonicalWaterPatch(patch,175,farOrigin,farDirection,time,0,expected+8*ulp,expected+100,n,outOfWork);
+            if(excluded>=0||outOfWork)failures++;
+            excluded=intersectCanonicalWaterPatch(patch,175,farOrigin,farDirection,time,0,0,expected-8*ulp,n,outOfWork);
+            if(excluded>=0||outOfWork)failures++;
+            patch.half=1-patch.half;
+            excluded=intersectCanonicalWaterPatch(patch,175,farOrigin,farDirection,time,0,0,expected+100,n,outOfWork);
+            if(excluded>=0||outOfWork)failures++;
+        }
     }
     fieldResults[c]=float4(float(failures),error,c<3840?gradientError:float(work),c<3840?0.0:1.0);
 }

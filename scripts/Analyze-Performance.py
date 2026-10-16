@@ -4,6 +4,7 @@ import csv
 import json
 import math
 import statistics
+import hashlib
 from collections import defaultdict
 from pathlib import Path
 
@@ -71,6 +72,11 @@ for phase, rows in sorted(groups.items()):
             "fps": 1000 / statistics.mean(intervals)}
     render_keys = ("quality", "renderWidth", "renderHeight", "displayWidth", "displayHeight", "filter", "spp", "bounces", "finiteWater", "omm", "nearPending", "lodPending")
     item["renderEvidence"] = all(k in rows[0] for k in render_keys)
+    if "waterShader" in rows[0]:
+        shaders = {r["waterShader"] for r in rows}
+        if len(shaders) != 1:
+            raise SystemExit("INVALID: shader changed inside measured phase")
+        item["waterShader"] = next(iter(shaders))
     if item["renderEvidence"]:
         for key in render_keys:
             if len({r[key] for r in rows}) != 1:
@@ -131,6 +137,35 @@ report["geometryStableAcrossAllPhases"] = all(
     len({tuple(item[k]) for item in report["phases"]}) == 1
     for k in ("nearInstances", "lodSections")) and all(item["geometryStable"] for item in report["phases"])
 included = [item for item in report["phases"] if not item["excluded"]]
+if metadata and metadata.get("waterShaderBaseline"):
+    baseline_hash = metadata.get("waterShaderBaselineSha256")
+    if not baseline_hash:
+        baseline_file = Path(metadata["waterShaderBaseline"])
+        baseline_hash = hashlib.sha256(baseline_file.read_bytes()).hexdigest()
+    sequence = [int(v) for v in metadata["waterShaderSequence"].split(",")]
+    if len(sequence) == 1:
+        sequence *= len(report["phases"])
+    if len(sequence) != len(report["phases"]) or any(v not in (0, 1) for v in sequence):
+        raise SystemExit("INVALID: shader comparison sequence")
+    candidates = set()
+    for item, variant in zip(report["phases"], sequence):
+        shader = item.get("waterShader", "")
+        if len(shader) != 64 or any(c not in "0123456789abcdef" for c in shader):
+            raise SystemExit("INVALID: missing actual shader identity")
+        if (shader == baseline_hash) != (variant == 0):
+            raise SystemExit("INVALID: actual shader does not match requested A/B order")
+        item["shaderVariant"] = variant
+        if variant:
+            candidates.add(shader)
+    if len(candidates) > 1:
+        raise SystemExit("INVALID: candidate shader changed between phases")
+    shader_settings = ("preset", "quality", "renderWidth", "renderHeight", "displayWidth", "displayHeight",
+                       "filter", "spp", "bounces", "finiteWater", "omm")
+    if any(any(k not in item for item in report["phases"]) or
+           len({item[k] for item in report["phases"]}) != 1 for k in shader_settings):
+        raise SystemExit("INVALID: shader A/B requires matching recorded render settings")
+    report["shaderComparison"] = {"baseline": baseline_hash, "candidates": sorted(candidates), "sequence": sequence,
+                                 "orderValidated": True, "settingsMatched": True}
 report["selectedGeometryStable"] = bool(included) and all(item["geometryStable"] for item in included) and all(
     len({tuple(item[k]) for item in included}) == 1 for k in ("nearInstances", "lodSections")) and len({item["nearRadius"] for item in included})==1
 report["selectedSceneVersionsStable"] = bool(included) and all(item.get("versionsStable", False) for item in included)

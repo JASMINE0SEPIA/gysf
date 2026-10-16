@@ -59,7 +59,7 @@ public final class PerformanceCapture {
             try { Files.createDirectories(output); }
             catch(IOException e){throw new UncheckedIOException(e);}
             if(Files.exists(output.resolve("frames.csv")))throw new IllegalStateException("Fresh performance label required");
-            rows.append("phase,rr,preset,elapsedMs,intervalMs,rtFrame,processBytes,budgetBytes,rtAllocationBytes,lodBytes,providerBytes,nearRadius,nearInstances,lodSections,deferrals,cameraX,cameraY,cameraZ,yaw,pitch,screen,lodRevision,texturedBuilds,atomicSwaps,nearTable,nearBuildToken,quality,renderWidth,renderHeight,displayWidth,displayHeight,filter,spp,bounces,finiteWater,omm,nearPending,lodPending,waterUploads,waterKnownNodes,waterPending\n");
+            rows.append("phase,rr,preset,elapsedMs,intervalMs,rtFrame,processBytes,budgetBytes,rtAllocationBytes,lodBytes,providerBytes,nearRadius,nearInstances,lodSections,deferrals,cameraX,cameraY,cameraZ,yaw,pitch,screen,lodRevision,texturedBuilds,atomicSwaps,nearTable,nearBuildToken,quality,renderWidth,renderHeight,displayWidth,displayHeight,filter,spp,bounces,finiteWater,omm,nearPending,lodPending,waterUploads,waterKnownNodes,waterPending,waterShader\n");
             // A non-RR control must not silently inherit another vendor filter/upscaler or FG.
             CausticaConfig.Rt.Fsr.ENABLED.set(false);CausticaConfig.Rt.Xess.ENABLED.set(false);
             CausticaConfig.Rt.Fg.ENABLED.set(false);CausticaConfig.Rt.Nrd.ENABLED.set(false);
@@ -76,6 +76,7 @@ public final class PerformanceCapture {
         }
         if(tick==400)client.getSingleplayerServer().submit(()->client.getSingleplayerServer().tickRateManager().setFrozen(true));
         if(preparedAt==0)return false;
+        WaterShaderComparison.prepare();
         long now=System.nanoTime();
         if(MemoryDiagnostics.ONLY) {
             if(!MemoryDiagnostics.tick(now,preparedAt,output))return false;
@@ -127,6 +128,7 @@ public final class PerformanceCapture {
     }
 
     private static void start(long now) {
+        WaterShaderComparison.select(phase,PRESETS.length);
         int preset=PRESETS[phase];
         CausticaConfig.Rt.DlssRr.ENABLED.set(preset>=0);
         if(preset>=0)CausticaConfig.Rt.DlssRr.PRESET.set(preset);
@@ -179,7 +181,8 @@ public final class PerformanceCapture {
                 .append(info.renderWidth()).append(',').append(info.renderHeight()).append(',').append(info.displayWidth()).append(',').append(info.displayHeight()).append(',')
                 .append(info.filter()).append(',').append(CausticaConfig.Rt.Composite.SPP.value()).append(',').append(CausticaConfig.Rt.Composite.MAX_BOUNCES.value()).append(',')
                 .append(RtWaterGeometry.runtimeEnabled()).append(',').append(RtDeviceBringup.ommEnabled()).append(",false,false,")
-                .append(water.uploads()).append(',').append(water.knownNodes()).append(',').append(water.pending()).append('\n');
+                .append(water.uploads()).append(',').append(water.knownNodes()).append(',').append(water.pending()).append(',')
+                .append(WaterShaderComparison.measuredFingerprint(rtFrame)).append('\n');
     }
 
     public static boolean locked() {

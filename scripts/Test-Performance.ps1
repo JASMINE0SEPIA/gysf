@@ -10,6 +10,8 @@ param(
     [ValidatePattern('^[0-5](?:,[0-5])*$')][string]$Qualities='0',
     [switch]$NearMemoryPressure,[switch]$PressureOnly,[switch]$ValidateVulkan,[switch]$EnableOmm,[switch]$MemoryDiagnostic,
     [switch]$FiniteWater,[switch]$GpuTimings,[switch]$CpuStats,
+    [string]$WaterShaderBaseline='',
+    [ValidatePattern('^[01](?:,[01])*$')][string]$WaterShaderSequence='0',
     [string]$Label=('perf-'+(Get-Date -Format 'yyyyMMdd-HHmmss')),
     [string]$ProviderJar='../voxy-vulkan-26.3/build/libs/voxy-vulkan-0.2.20-26.3-vulkan.10-dev-d4097ba.jar'
 )
@@ -33,6 +35,13 @@ try {
         "-Dgysf.smoke.perfQualities=$Qualities","-Dgysf.rt.finiteWater=$($FiniteWater.ToString().ToLowerInvariant())")
     if($GpuTimings){$taskFlags+='"-Dgysf.rt.gpuTimings='+[IO.Path]::GetFullPath("run-smoke/performance-smoke/$Label/gpu.csv")+'"'}
     if($CpuStats){$taskFlags+='-Dgysf.smoke.perfCpuStats=true'}
+    if($WaterShaderBaseline) {
+        if(!$FiniteWater){throw 'Shader comparison requires -FiniteWater'}
+        if($WaterShaderSequence.Split(',').Count -ne 1 -and $WaterShaderSequence.Split(',').Count -ne $Presets.Split(',').Count){throw 'Shader sequence count must be one or match presets'}
+        $taskBaseline=(Resolve-Path -LiteralPath $WaterShaderBaseline).Path
+        $taskFlags+='"-Dgysf.smoke.waterShaderBaseline='+$taskBaseline+'"'
+        $taskFlags+="-Dgysf.smoke.waterShaderSequence=$WaterShaderSequence"
+    }
     if($NearMemoryPressure){$taskFlags+='-Dgysf.smoke.nearMemoryPressure=true'}
     if($PressureOnly){$taskFlags+='-Dgysf.smoke.nearMemoryPressureOnly=true'}
     if($EnableOmm){$taskFlags+='-Dcaustica.rt.ommStats=true'}
@@ -52,7 +61,12 @@ try {
         finiteWater=[bool]$FiniteWater;omm=[bool]$EnableOmm;presets=$Presets;qualities=$Qualities;
         sourceHead=(& git rev-parse HEAD);sourceDirty=[bool](& git status --porcelain);
         providerSha256=(Get-FileHash -LiteralPath $ProviderJar).Hash;initialSeconds=$InitialSeconds;
+        waterShaderBaseline=if($WaterShaderBaseline){$taskBaseline}else{''};waterShaderSequence=$WaterShaderSequence;
+        waterShaderBaselineSha256=if($WaterShaderBaseline){(Get-FileHash -LiteralPath $taskBaseline).Hash.ToLowerInvariant()}else{''};
         settleSeconds=$SettleSeconds;measureSeconds=$MeasureSeconds
     } | ConvertTo-Json | Set-Content -LiteralPath "run-smoke/performance-smoke/$Label/run.json" -Encoding utf8
+    if($WaterShaderBaseline -and !(Select-String -LiteralPath "$Label.log" -Pattern 'GYSF_SHADER_COMPARE: complete switches=\d+ liveAlternates=0' -Quiet)) {
+        throw 'Missing alternate-pipeline lifetime qualification'
+    }
     Write-Output "Evidence: run-smoke/performance-smoke/$Label; log: $Label.log"
 } finally { $env:JAVA_TOOL_OPTIONS=$savedJavaOptions;Pop-Location }
