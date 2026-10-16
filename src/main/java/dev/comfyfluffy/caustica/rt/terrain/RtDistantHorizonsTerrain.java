@@ -124,6 +124,7 @@ public final class RtDistantHorizonsTerrain {
     private boolean forceSourceRebuild;
     private long atomicVoxySwaps;
     private long voxyReplacementSwaps, voxyCoverageChecks;
+    private long providerEpoch=Long.MIN_VALUE;
     private final LodBudgetController memoryController=new LodBudgetController();
     private long rejectedAllocationBytes;
     private long nextMemoryLog;
@@ -169,12 +170,14 @@ public final class RtDistantHorizonsTerrain {
             if (current != null || world != null) reset(ctx, true);
             return;
         }
-        if (world != newWorld) {
+        long nextProviderEpoch=VoxyCompat.sceneEpoch();
+        if (world != newWorld || providerEpoch!=nextProviderEpoch) {
             // The DH upload hook may already have captured VBOs for this new ClientLevel. Reset only GPU
             // proxy/build state here; DistantHorizonsCompat scopes and clears old CPU captures by level
             // identity, so deleting the map again would erase fresh data that DH may never re-upload.
             reset(ctx, false);
             world = newWorld;
+            providerEpoch=nextProviderEpoch;
             // DH starts populating its repository after LevelRenderer. Avoid querying during world load.
             earliestBuildNanos = System.nanoTime() + 1_000_000_000L;
         }
@@ -218,6 +221,10 @@ public final class RtDistantHorizonsTerrain {
         // bursts for many seconds; wait for a quiet window, then rebuild only changed source meshes.
         boolean replacementBusy = buildSession != null || packPending;
         if (!pending && !cpuPending && !replacementBusy && now >= earliestBuildNanos
+                // Do not freeze a CPU bootstrap parent into a long-lived RT fallback. Once the provider
+                // has the requested children, they can publish independently as small source volumes.
+                // Existing published geometry remains owned throughout this brief admission delay.
+                && !VoxyCompat.refinementPending()
                 && RtMaterialRegistry.INSTANCE.isReady() && refreshAdmissionAllowed(ctx)
                 && (current == null || cameraCellChanged || refreshUploadedLods)) {
             anchorX = ax;
@@ -310,6 +317,11 @@ public final class RtDistantHorizonsTerrain {
     public long memoryRecoveryCount() { return memoryController.recoveryCount(); }
     public int memoryDistanceLimit() { return memoryController.limitBlocks(); }
 
+    public boolean hasPublishedCoverage(int sectionX,int sectionY,int sectionZ) {
+        Proxy proxy=current;
+        return proxy!=null && proxy.coverage.containsSection(sectionX,sectionY,sectionZ);
+    }
+
     private void pollMemoryBudget(RtContext ctx) {
         if(!VoxyCompat.active()) return;
         long now=System.nanoTime();
@@ -334,7 +346,7 @@ public final class RtDistantHorizonsTerrain {
         rejectedAllocationBytes=pressure.requestedBytes();
         abortBuildSession();
         long now=System.nanoTime();
-        memoryController.pressure(VoxyCompat.requestedDistanceBlocks(),now);
+        if(pressure.mayReduceDistance())memoryController.pressure(VoxyCompat.requestedDistanceBlocks(),now);
         boolean controlled=VoxyCompat.limitDistance(memoryController.limitBlocks());
         capturedLodRevision=-1;
         anchorX=anchorZ=Integer.MIN_VALUE;
@@ -1627,6 +1639,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private static final class Proxy {
+        final VoxyCoverageIndex coverage;
         final long revision;
         final List<GeomEntry> entries;
         final Map<Long, SourceState> sources;
@@ -1657,6 +1670,7 @@ public final class RtDistantHorizonsTerrain {
                 sourceStates.put(group.getKey(), new SourceState(version, sourceEntries));
             }
             this.sources = Map.copyOf(sourceStates);
+            this.coverage = new VoxyCoverageIndex(entries.stream().map(e->e.volume).filter(java.util.Objects::nonNull).toList());
         }
 
         Set<RtSectionTable.SectionGeom> geomIdentitySet() {

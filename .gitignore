@@ -5,6 +5,7 @@
 native/*/build/
 run/
 run-smoke/
+run-player-visual*/
 .tools/
 artifacts/
 out/

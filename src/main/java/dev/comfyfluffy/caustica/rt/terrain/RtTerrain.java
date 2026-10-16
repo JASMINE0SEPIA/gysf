@@ -139,6 +139,9 @@ public final class RtTerrain {
     private final RtSectionSnapshots snapshots = new RtSectionSnapshots();
     private LongOpenHashSet published = new LongOpenHashSet();
     private final LongOpenHashSet empty = new LongOpenHashSet(); // loaded, in-window sections with no geometry
+    private final LongOpenHashSet handoffRetained = new LongOpenHashSet();
+    private long completedHandoffs;
+    private int readyMinScx,readyMinScz,readySizeX,readySizeZ;
     private final Object dirtyLock = new Object();
     private final LongOpenHashSet dirty = new LongOpenHashSet(); // edited sections to re-extract
     private final LongArrayList dirtyDrain = new LongArrayList();
@@ -178,6 +181,8 @@ public final class RtTerrain {
     private volatile boolean fullClearRequested;
     private volatile boolean dirtyPending;
     private boolean noWorldClearApplied;
+    private ClientLevel residencyWorld;
+    private long residencyMaterialEpoch=Long.MIN_VALUE;
     // Rebase origin (player block at the last TLAS rebuild) for the instance transforms + ray camOffset.
     public int blockX;
     public int blockY;
@@ -429,14 +434,18 @@ public final class RtTerrain {
             return; // resource reload gap: keep old work dormant until the new epoch requests a full clear
         }
 
-        // Full clear on an explicit invalidation — vanilla's LevelExtractor.allChanged() via the Fabric
-        // InvalidateRenderStateCallback. That fires on a dimension switch (setLevel → allChanged),
-        // render-distance change, and F3+A. Without it, End→Overworld keeps the old dimension's geometry:
-        // residency is keyed by raw section coords (no world identity), so the same coords stay resident
-        // and are never rebuilt for the new world.
-        if (fullClearRequested) {
+        // World/material changes require a fresh scope. Video-option changes and F3+A within that
+        // scope can rebuild in place: withdrawing every published section first exposes an empty ring.
+        if(residencyWorld!=level || residencyMaterialEpoch!=RtMaterialRegistry.INSTANCE.epoch()) {
             fullClearRequested = false;
             clear(ctx, false);
+            residencyWorld=level;
+            residencyMaterialEpoch=RtMaterialRegistry.INSTANCE.epoch();
+        } else if(fullClearRequested) {
+            fullClearRequested=false;
+            snapshots.clear();
+            for(LongIterator it=desired.iterator();it.hasNext();)handleDirtySection(it.nextLong(),NO_DIRTY_GROUP);
+            distantReadyMaskDirty=true;
         }
 
         int pbx = mc.player.getBlockX();
@@ -462,6 +471,7 @@ public final class RtTerrain {
         // Evicted geometry lands in `removed` and is consumed by the next streaming pass's build kick.
         try (RtFrameStats.Scope ignored = RtFrameStats.FRAME.stage("terrain.windowSync")) {
             syncDesiredWindow(chunkSource, pcx, psy, pcz, r, loY, hiY, removed);
+            releaseCoveredHandoffs(removed);
         }
 
         // Re-extract edited sections. Drain under a short lock so concurrent block updates are not lost.
@@ -696,9 +706,10 @@ public final class RtTerrain {
             clearQueuedWork(key, true);
             invalidateInFlight(key);
             empty.remove(key);
-            SectionGeom g = resident.remove(key);
+            SectionGeom g = resident.get(key);
             if (g != null) {
-                removed.add(g);
+                if (retainForHandoff(key)) handoffRetained.add(key);
+                else { resident.remove(key); removed.add(g); }
             }
         }
     }
@@ -707,6 +718,7 @@ public final class RtTerrain {
         for (ObjectIterator<Long2ObjectMap.Entry<SectionGeom>> it = resident.long2ObjectEntrySet().fastIterator(); it.hasNext(); ) {
             Long2ObjectMap.Entry<SectionGeom> e = it.next();
             if (!desired.contains(e.getLongKey())) {
+                if(retainForHandoff(e.getLongKey())) {handoffRetained.add(e.getLongKey());continue;}
                 removed.add(e.getValue());
                 it.remove();
             }
@@ -714,6 +726,36 @@ public final class RtTerrain {
         removeKeysNotIn(empty, desired);
         removeInFlightNotIn(desired);
         removeQueuedGroupsNotIn(desired);
+    }
+
+    public int retainedHandoffSectionCount() { return handoffRetained.size(); }
+    public long completedHandoffCount() { return completedHandoffs; }
+
+    private boolean retainForHandoff(long key) {
+        var player=Minecraft.getInstance().player;
+        if(player==null)return false;
+        int sx=sectionX(key),sy=sectionY(key),sz=sectionZ(key);
+        return NearHandoff.retain(VoxyCompat.active(),
+                RtDistantHorizonsTerrain.INSTANCE.hasPublishedCoverage(sx,sy,sz),
+                sx-(player.getBlockX()>>4),sz-(player.getBlockZ()>>4),VoxyCompat.requestedDistanceBlocks()/16);
+    }
+
+    private void releaseCoveredHandoffs(List<SectionGeom> removed) {
+        for(LongIterator it=handoffRetained.iterator();it.hasNext();) {
+            long key=it.nextLong();
+            if(desired.contains(key)) {
+                it.remove();
+                // The loaded column may have changed while this exact fallback was retained.
+                handleDirtySection(key,NO_DIRTY_GROUP);
+                distantReadyMaskDirty=true;
+            } else if(!retainForHandoff(key)) {
+                it.remove();
+                SectionGeom geom=resident.remove(key);
+                if(geom!=null)removed.add(geom);
+                completedHandoffs++;
+                distantReadyMaskDirty=true;
+            }
+        }
     }
 
     private void handleDirtyEvent(DirtyEvent event) {
@@ -918,16 +960,16 @@ public final class RtTerrain {
             rebuildReadyMask();
             distantReadyMaskDirty = false;
         }
-        int sizeX = windowRadius * 2 + 1;
+        int sizeX = readySizeX;
         int sizeY = windowHiY - windowLoY + 1;
-        int sizeZ = sizeX;
+        int sizeZ = readySizeZ;
         int bytes = 32 + distantReadyMaskWords.length * Integer.BYTES;
         if (dst.capacity() < bytes) {
             throw new IllegalArgumentException("Distant readiness mask requires " + bytes
                     + " bytes, ring slice has " + dst.capacity());
         }
-        int minScx = windowPcx - windowRadius;
-        int minScz = windowPcz - windowRadius;
+        int minScx = readyMinScx;
+        int minScz = readyMinScz;
         dst.putInt(0, minScx * 16 - blockX);
         dst.putInt(4, windowLoY * 16 - blockY);
         dst.putInt(8, minScz * 16 - blockZ);
@@ -947,9 +989,18 @@ public final class RtTerrain {
             distantReadyMaskWords = new int[0];
             return;
         }
-        int sizeX = windowRadius * 2 + 1;
+        int minScx=windowPcx-windowRadius,minScz=windowPcz-windowRadius;
+        int maxScx=windowPcx+windowRadius,maxScz=windowPcz+windowRadius;
+        for(LongIterator it=handoffRetained.iterator();it.hasNext();) {
+            long key=it.nextLong();
+            if(!resident.containsKey(key) || !published.contains(key))continue;
+            minScx=Math.min(minScx,sectionX(key));maxScx=Math.max(maxScx,sectionX(key));
+            minScz=Math.min(minScz,sectionZ(key));maxScz=Math.max(maxScz,sectionZ(key));
+        }
+        int sizeX = maxScx-minScx+1;
         int sizeY = windowHiY - windowLoY + 1;
-        int sizeZ = sizeX;
+        int sizeZ = maxScz-minScz+1;
+        readyMinScx=minScx;readyMinScz=minScz;readySizeX=sizeX;readySizeZ=sizeZ;
         int bitCount = Math.multiplyExact(Math.multiplyExact(sizeX, sizeY), sizeZ);
         int wordCount = (bitCount + 31) >>> 5;
         if (distantReadyMaskWords.length != wordCount) {
@@ -957,8 +1008,6 @@ public final class RtTerrain {
         } else {
             Arrays.fill(distantReadyMaskWords, 0);
         }
-        int minScx = windowPcx - windowRadius;
-        int minScz = windowPcz - windowRadius;
         for (LongIterator it = desired.iterator(); it.hasNext(); ) {
             long key = it.nextLong();
             if (!empty.contains(key)
@@ -973,6 +1022,14 @@ public final class RtTerrain {
             }
             int bit = readyMaskBitIndex(x, y, z, sizeX, sizeZ);
             distantReadyMaskWords[bit >>> 5] |= 1 << (bit & 31);
+        }
+        for(LongIterator it=handoffRetained.iterator();it.hasNext();) {
+            long key=it.nextLong();
+            if(!resident.containsKey(key)||!published.contains(key))continue;
+            int x=sectionX(key)-minScx,y=sectionY(key)-windowLoY,z=sectionZ(key)-minScz;
+            if(y<0||y>=sizeY)continue;
+            int bit=readyMaskBitIndex(x,y,z,sizeX,sizeZ);
+            distantReadyMaskWords[bit>>>5]|=1<<(bit&31);
         }
     }
 
@@ -1800,6 +1857,8 @@ public final class RtTerrain {
 
     /** Full teardown (world exit / shutdown): drain the GPU, then free everything incl. an in-flight build. */
     private void clear(RtContext ctx, boolean shutdown) {
+        residencyWorld=null;
+        residencyMaterialEpoch=Long.MIN_VALUE;
         nearMemory.reset();
         distantReadyMaskWords = new int[0];
         distantReadyMaskDirty = true;
@@ -1866,6 +1925,7 @@ public final class RtTerrain {
             g.destroy();
         }
         resident.clear();
+        handoffRetained.clear();
         empty.clear();
         table.instances = null;
         published.clear();
@@ -1907,6 +1967,7 @@ public final class RtTerrain {
         oldGeometry.addAll(resident.values());
         oldGeometry.addAll(removed);
         resident.clear();
+        handoffRetained.clear();
         removed.clear();
 
         ArrayList<PreparedSection> oldPrepared = new ArrayList<>(prepared);

@@ -45,7 +45,8 @@ final class RtSectionSnapshots {
     /** Cache/region marker for a section with no copyable states (all air, unloaded, or out of range). */
     private static final Object AIR = new Object();
 
-    private final Long2ObjectLinkedOpenHashMap<Object> cache = new Long2ObjectLinkedOpenHashMap<>();
+    private record Entry(Object source, Object snapshot) {}
+    private final Long2ObjectLinkedOpenHashMap<Entry> cache = new Long2ObjectLinkedOpenHashMap<>();
 
     /** Snapshot the 3×3×3 neighbourhood of a section, reusing cached palette copies (render thread). */
     Region createRegion(ClientLevel level, int scx, int scy, int scz) {
@@ -71,34 +72,35 @@ final class RtSectionSnapshots {
 
     private Object section(ClientLevel level, int scx, int scy, int scz) {
         long key = RtTerrain.sectionKey(scx, scy, scz);
-        Object cached = cache.getAndMoveToLast(key);
-        if (cached != null) {
-            return cached;
-        }
-        Object copy = copySection(level, scx, scy, scz);
-        cache.putAndMoveToLast(key, copy);
-        if (cache.size() > MAX_ENTRIES) {
-            cache.removeFirst();
-        }
-        return copy;
-    }
-
-    private static Object copySection(ClientLevel level, int scx, int scy, int scz) {
         LevelChunk chunk = level.getChunk(scx, scz);
         if (chunk instanceof EmptyLevelChunk) {
+            cache.remove(key);
             return AIR;
         }
         LevelChunkSection[] sections = chunk.getSections();
         int index = chunk.getSectionIndexFromSectionY(scy);
         if (index < 0 || index >= sections.length) {
+            cache.remove(key);
             return AIR;
         }
         LevelChunkSection section = sections[index];
-        if (section.hasOnlyAir()) {
-            return AIR;
-        }
-        RtFrameStats.FRAME.count("sectionCopies", 1);
-        return section.getStates().copy();
+        return snapshot(key,section,()->{
+            if(section.hasOnlyAir())return AIR;
+            RtFrameStats.FRAME.count("sectionCopies",1);
+            return section.getStates().copy();
+        });
+    }
+
+    // A neighboring column can be cached without ever entering the desired RT window. Its unload
+    // therefore need not pass removeDesiredColumnSections. Keying only by coordinates resurrects its
+    // old AIR/palette after the same column arrives again; the loaded section identity must agree too.
+    Object snapshot(long key,Object source,java.util.function.Supplier<Object> capture) {
+        Entry entry=cache.getAndMoveToLast(key);
+        if(entry!=null && entry.source()==source)return entry.snapshot();
+        Object copy=capture.get();
+        cache.putAndMoveToLast(key,new Entry(source,copy));
+        if(cache.size()>MAX_ENTRIES)cache.removeFirst();
+        return copy;
     }
 
     /**

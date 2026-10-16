@@ -91,11 +91,12 @@ final class RtVoxyMesh {
                     if(length<=0) throw new IllegalStateException("Voxy published a degenerate quad");
                     prims[offset]=nx/length; prims[offset+1]=ny/length; prims[offset+2]=nz/length;
                     prims[offset+3]=model.emission()/15f;
-                    // Water tint is an optical coefficient, matching FluidCapture's normalized biome
-                    // colour. Ordinary albedo tint uses the atlas shader's linear colour convention.
-                    prims[offset+4]=tintChannel(tint==-1?255:(tint>>>16)&255,model.water());
-                    prims[offset+5]=tintChannel(tint==-1?255:(tint>>>8)&255,model.water());
-                    prims[offset+6]=tintChannel(tint==-1?255:tint&255,model.water());
+                    // Match the near Fabric model mesher's normalized authored tint multiplier.
+                    // Both hit shaders linearize the sprite separately; curving only the LOD tint
+                    // makes biome boundaries visibly darker.
+                    prims[offset+4]=(tint==-1?255:(tint>>>16)&255)/255f;
+                    prims[offset+5]=(tint==-1?255:(tint>>>8)&255)/255f;
+                    prims[offset+6]=(tint==-1?255:tint&255)/255f;
                     prims[offset+7]=kind;
                     prims[offset+8]=Float.intBitsToFloat(material);
                     prims[offset+9]=Float.intBitsToFloat(flags);
@@ -152,8 +153,4 @@ final class RtVoxyMesh {
         }
     }
 
-    private static float tintChannel(int value,boolean water) {
-        float f=value/255f;
-        return water?f:f<=0.04045f?f/12.92f:(float)Math.pow((f+0.055f)/1.055f,2.4);
-    }
 }

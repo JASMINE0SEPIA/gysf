@@ -63,6 +63,11 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private final WaterDomainSmokeProbe waterDomain=new WaterDomainSmokeProbe();
     private final WaterGuideCapture waterGuides=new WaterGuideCapture();
     @Override public void onInitializeClient() {
+        if (Boolean.getBoolean("gysf.smoke.playerVisual")) {
+            var capture = new PlayerVisualCapture();
+            ClientTickEvents.END_CLIENT_TICK.register(capture::tick);
+            return;
+        }
         if(WaterGuideCapture.VARIED&&(!WaterGuideCapture.ENABLED||WaterGuideCapture.OPTICS||PERFORMANCE||WaterCacheLifecycle.ENABLED))
             throw new IllegalStateException("Varied water requires its own mixed/near guide comparison");
         if(dev.comfyfluffy.caustica.rt.terrain.WaterSourceSmokeProbe.ENABLED&&(!CLEAN_WATER||!WATER_COMPARE||FLUID_MIP

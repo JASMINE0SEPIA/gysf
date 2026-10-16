@@ -143,6 +143,7 @@ public final class PerformanceCapture {
     }
 
     public static void frame() {
+        if(Boolean.getBoolean("gysf.smoke.playerVisual"))NearOwnershipSmokeProbe.frame();
         if(ENABLED && PRESSURE && !pressureDone)NearOwnershipSmokeProbe.frame();
         if(!ENABLED || phase<0 || phase>=PRESETS.length || preparedAt==0)return;
         long now=System.nanoTime(),rtFrame=RtComposite.frameCounter();

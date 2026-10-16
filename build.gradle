@@ -93,13 +93,13 @@ loom {
         smokeClient {
             client()
             source sourceSets.smokeTest
-            runDir 'run-smoke'
-            vmArg '-Xmx4G'
+            runDir(findProperty('smokeRunDir') ?: 'run-smoke')
+            vmArg "-Xmx${findProperty('smokeMaxHeap') ?: '4G'}"
             vmArg '-Xss16m'
             vmArg '--enable-native-access=ALL-UNNAMED'
             vmArg '-Dcaustica.rt.spp=1'
             vmArg "-Dcaustica.rt.maxBounces=${findProperty('smokeMaxBounces') ?: 2}"
-            vmArg '-Dvoxy.external.maxDistanceBlocks=512'
+            vmArg "-Dvoxy.external.maxDistanceBlocks=${findProperty('smokeLodDistance') ?: 512}"
             if (project.hasProperty('vooxxySmoke')) vmArg '-Dgysf.smoke.vooxxy=true'
             programArgs '--offlineDeveloperMode', '--graphicsBackend', 'VULKAN'
             if (project.hasProperty('validateVulkan')) programArgs '--vulkanValidation', '--renderDebugLabels'

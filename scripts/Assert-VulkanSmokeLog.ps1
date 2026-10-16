@@ -16,7 +16,7 @@ if($RequireNearPressure) {
        [int]$p[5].Value -ge [int]$p[4].Value -or [int]$p[6].Value -le [int]$p[5].Value -or [int]$p[7].Value -lt 30) {
         throw "Near-pressure contraction/recovery/ownership qualification failed in $Path"
     }
-} elseif($content -notmatch 'GYSF_(SMOKE|PERF): PASS') {throw "Missing smoke/performance PASS marker in $Path"}
+} elseif($content -notmatch 'GYSF_(SMOKE|PERF|PLAYER_VISUAL): PASS') {throw "Missing smoke/performance/visual PASS marker in $Path"}
 $shutdowns=[regex]::Matches($content,'RT LOD native shutdown: live=(\d+) bytes')
 if($shutdowns.Count -eq 0 -or ($shutdowns | Where-Object { [long]$_.Groups[1].Value -ne 0 })) {
     throw "Missing or nonzero native LOD shutdown in $Path"

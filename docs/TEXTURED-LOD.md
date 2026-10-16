@@ -33,6 +33,13 @@ Unpublished replacement resources remain session-owned across checkpoints and
 are destroyed if the session is cancelled. Complete Voxy sources in an
 intermediate checkpoint remain reusable after cancellation.
 
+Newer API 6 scenes optionally expose `refinementPending()`. The RT planner waits while a selected
+nonempty parent is only a CPU bootstrap fallback for unfinished requested children, keeping the
+currently published proxy and exact-terrain handoff residents. Admitting that transient parent
+would otherwise make thousands of later fine batches one overlapping replacement group. This flag
+does not reject intentionally coarse distant targets; older providers without the method retain
+their existing admission behavior. See `VISUAL-CONTINUITY-2026-10-16.md` for the reproduced case.
+
 `-Dgysf.voxy.validateCoverage=true` checks every published Voxy partition for
 overlapping cubes and mixed source revisions. Ten transition tests cover
 vertical separation, negative coordinates, eight-child replacement,
@@ -50,7 +57,8 @@ tile size from image dimensions, clamps each face at the chosen mip and handles
 the provider's reduced-resolution mip-tail atlas without fixed pixel offsets.
 
 The shader samples per-face albedo/alpha and applies the model's conditional
-biome tint in linear lighting. Coverage uses base-level alpha so mip averaging
+biome tint with the same normalized multiplier as near Fabric terrain; sampled sprite RGB is
+linearized separately in both paths. Coverage uses base-level alpha so mip averaging
 cannot fill foliage holes; closest-hit albedo still uses ray-cone mip filtering.
 It preserves water/glass/emission classification
 and block-state material profiles. The baked RGBA atlas does not carry LabPBR

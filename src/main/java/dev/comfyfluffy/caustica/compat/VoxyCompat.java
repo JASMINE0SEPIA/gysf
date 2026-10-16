@@ -67,6 +67,12 @@ public final class VoxyCompat {
         return boundAtlasSlot;
     }
     public static int boundAtlasSlot() { return boundAtlasSlot; }
+    public static long sceneEpoch() {
+        return API!=null && API.textured!=null ? API.textured.sceneEpoch() : Long.MIN_VALUE;
+    }
+    public static boolean refinementPending() {
+        return API!=null && API.textured!=null && API.textured.refinementPending();
+    }
     public static int texturedMeshCount() {
         int count=0; for(var mesh:snapshot) if(mesh.textured()!=null) count++;
         return count;

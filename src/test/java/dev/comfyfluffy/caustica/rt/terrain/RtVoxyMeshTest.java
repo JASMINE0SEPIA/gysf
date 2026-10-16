@@ -134,7 +134,7 @@ final class RtVoxyMeshTest {
         assertEquals(1,packed.material()[4*12+7]);
     }
 
-    @Test void waterKeepsNearFluidOpticalTintWhileSolidAlbedoIsLinear() {
+    @Test void solidAndWaterUseTheSameAuthoredTintMultipliersAsNearTerrain() {
         int biome=0x3F76E4;
         var water=new VoxySceneData.Model(1,FULL,FULL,FULL,FULL,FULL,FULL,0,biome,null,true,true,false,0);
         var solid=new VoxySceneData.Model(2,FULL,FULL,FULL,FULL,FULL,FULL,0,biome,null,false,false,false,0);
@@ -142,7 +142,7 @@ final class RtVoxyMeshTest {
         int waterOffset=2*12;
         assertArrayEquals(new float[]{.24705882f,.46274510f,.89411765f},
                 java.util.Arrays.copyOfRange(packed.material(),waterOffset+4,waterOffset+7),1e-6f);
-        assertArrayEquals(new float[]{.04970657f,.18116424f,.77582222f},
+        assertArrayEquals(new float[]{.24705882f,.46274510f,.89411765f},
                 java.util.Arrays.copyOfRange(packed.material(),4,7),1e-6f);
     }
 

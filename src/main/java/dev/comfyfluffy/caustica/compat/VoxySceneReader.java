@@ -12,6 +12,8 @@ final class VoxySceneReader {
     private final Field key, meshRevision, level;
     private final Method[] modelValues;
     private final Method fluidHeights;
+    private final Method refinementPending;
+    private boolean pendingRefinement;
     private Object previous, previousModels;
     private VoxySceneData.Palette palette;
     private long currentEpoch = Long.MIN_VALUE, version;
@@ -26,6 +28,9 @@ final class VoxySceneReader {
         Class<?> scene = Class.forName("me.cortex.voxy.api.LodScene");
         epoch=scene.getMethod("epoch"); meshes=scene.getMethod("meshes"); models=scene.getMethod("models");
         colours=scene.getMethod("colours"); atlas=scene.getMethod("atlasView");
+        Method pending=null;
+        try {pending=scene.getMethod("refinementPending");}catch(NoSuchMethodException olderProvider) { }
+        refinementPending=pending;
         Class<?> mesh=Class.forName("me.cortex.voxy.api.LodMesh");
         key=mesh.getField("key"); meshRevision=mesh.getField("revision"); level=mesh.getField("level");
         quads=mesh.getMethod("quads"); ox=mesh.getMethod("originX"); oy=mesh.getMethod("originY");
@@ -46,6 +51,7 @@ final class VoxySceneReader {
         if(scene==previous) return published;
         long nextEpoch=(long)epoch.invoke(scene);
         if(nextEpoch!=currentEpoch) { clear(); currentEpoch=nextEpoch; }
+        pendingRefinement=refinementPending!=null && (boolean)refinementPending.invoke(scene);
         Object nextModels=models.invoke(scene);
         if(previousModels!=nextModels) {
             VoxySceneData.Model[] entries=new VoxySceneData.Model[65536];
@@ -91,9 +97,12 @@ final class VoxySceneReader {
         return published;
     }
     long atlasView() { return atlasView; }
+    long sceneEpoch() { return currentEpoch; }
+    boolean refinementPending() { return pendingRefinement; }
     Object atlasOwner() { return atlasOwner; }
     void clear() {
         cache.clear(); previous=previousModels=null; palette=null; published=List.of();
         currentEpoch=Long.MIN_VALUE; atlasView=0; atlasOwner=new Object();
+        pendingRefinement=false;
     }
 }

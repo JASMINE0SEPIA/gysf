@@ -255,6 +255,11 @@ public final class RtComposite {
      * frame (never cached) so the Video Settings toggles take effect on the next frame, the way every
      * other runtime-tunable option in the renderer does.
      */
+    private static boolean cloudsEnabled() {
+        return RtCloudSettings.enabled(CausticaConfig.Rt.Composite.CLOUDS.value(),
+                Minecraft.getInstance().options.getCloudStatus());
+    }
+
     private static int featureFlags() {
         int flags = 0;
         if (CausticaConfig.Rt.Composite.SSS.value()) {
@@ -269,7 +274,7 @@ public final class RtComposite {
         if (CausticaConfig.Rt.Sharc.ENABLED.value() && RtSharc.INSTANCE.entryCount() > 0) {
             flags |= FEATURE_SHARC;
         }
-        if (CausticaConfig.Rt.Composite.CLOUDS.value()) {
+        if (cloudsEnabled()) {
             flags |= FEATURE_CLOUDS;
             // The style is a feature bit, not a packed float lane: featureFlags is exactly the word for
             // player-facing effect toggles, and an integer bit survives every float quirk.
@@ -453,19 +458,6 @@ public final class RtComposite {
     private static final double CLOUD_FIELD_PERIOD_BLOCKS = 512.0 * 12.0 * 2.0 / 0.5;
     // Vanilla's clouds drift at 0.03 blocks/tick; matched so the sky moves at a familiar speed.
     private static final double CLOUD_WIND_BLOCKS_PER_TICK = 0.03;
-    // Deck thickness at the slider's 100%. Both styles march a real slab now, so this is the depth the
-    // clouds actually have in the world: at full thickness a bank is tall enough to fly into, while the
-    // slider at 0 collapses the deck to the old flat plane.
-    // Real cumulus is as tall as it is wide, often taller — a bank whose base sits at cloud height can
-    // easily tower 100+ blocks. 40 was too shallow for the deck to ever read as heaped rather than
-    // layered, and since extinction is now normalised by the slab depth (CLOUD_REFERENCE_THICKNESS in
-    // clouds.slang) raising this adds VOLUME without making the clouds more opaque.
-    private static final float CLOUD_MAX_THICKNESS_BLOCKS = 110.0f;
-    // Classic boxes never get thinner than vanilla's own 4-block extrusion (CloudRenderer's
-    // putVec3(12, 4, 12)): the thickness slider scales the box HEIGHT from that baseline up, per the
-    // classic rework's "vanilla shapes, slider-driven depth" decision. Volumetric keeps the full
-    // 0..110 range, including the flat-sheet collapse at zero.
-    private static final float CLOUD_CLASSIC_MIN_THICKNESS = 4.0f;
     // Vanilla offsets the deck half a cell minus a sliver in Z (CloudRenderer.render: cameraZ + 3.96),
     // so the camera sits asymmetrically inside the cell grid. Matched for shape-parity with vanilla;
     // the x offset is the wind scroll itself.
@@ -1641,7 +1633,7 @@ public final class RtComposite {
             // the push itself; doing it every frame keeps all six slots valid instead of tracking which
             // slot last received the map. Address 0 when no usable clouds.png exists, which the shader
             // reads as "fall back to the noise deck" — a resource pack can never remove the clouds.
-            int[] cloudCells = RtCloudCells.INSTANCE.cells();
+            int[] cloudCells = cloudsEnabled() ? RtCloudCells.INSTANCE.cells() : null;
             long cloudCellsAddress = 0L;
             if (cloudCells != null) {
                 ByteBuffer cellsBuf = MemoryUtil.memByteBuffer(
@@ -2531,7 +2523,7 @@ public final class RtComposite {
         float coverage = CausticaConfig.Rt.Composite.CLOUD_COVERAGE.value();
         float opacity = CausticaConfig.Rt.Composite.CLOUD_OPACITY.value();
         float shadow = CausticaConfig.Rt.Composite.CLOUD_SHADOW_STRENGTH.value();
-        if (dimension != DIMENSION_OVERWORLD) {
+        if (dimension != DIMENSION_OVERWORLD || !cloudsEnabled()) {
             // Neither the Nether nor the End has a sky to put clouds in; both draw a closed skybox.
             return CloudPush.NONE;
         }
@@ -2557,16 +2549,10 @@ public final class RtComposite {
         // offset matches vanilla's own (cameraZ + 3.96 in CloudRenderer.render).
         double anchorX = camX + drift;
         double anchorZ = camZ + CLOUD_Z_OFFSET_BLOCKS;
-        // Player-controlled thickness. At 0 the shader takes its flat-plane path (see
-        // CLOUD_FLAT_EPSILON in clouds.slang), so the slider bottoming out is genuinely a flat deck
-        // rather than a degenerate zero-length march — that stays true for the volumetric style. The
-        // classic style floors at vanilla's own 4-block box height instead: its shapes come from the
-        // authored clouds.png cells, and the slider scales box HEIGHT from the vanilla baseline up.
-        float thickness = Math.clamp(CausticaConfig.Rt.Composite.CLOUD_THICKNESS.value(), 0f, 1f)
-                * CLOUD_MAX_THICKNESS_BLOCKS;
-        if (CausticaConfig.Rt.Composite.cloudStyleIndex() != CLOUD_STYLE_VOLUMETRIC) {
-            thickness = Math.max(CLOUD_CLASSIC_MIN_THICKNESS, thickness);
-        }
+        // Volumetric depth remains adjustable. Classic follows Minecraft's FAST/FANCY shape depth.
+        float thickness = RtCloudSettings.thickness(
+                CausticaConfig.Rt.Composite.cloudStyleIndex() == CLOUD_STYLE_VOLUMETRIC,
+                Minecraft.getInstance().options.getCloudStatus(), CausticaConfig.Rt.Composite.CLOUD_THICKNESS.value());
         // The slider sets the deck's BASE, but the shader's slab is centred on the pushed height, so the
         // half-thickness is added back here. Pushing the base directly would make the clouds appear to
         // sink as the thickness slider is raised (the slab would grow downward as well as upward), which

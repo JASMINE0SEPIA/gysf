@@ -18,13 +18,24 @@ public final class RtLodMemory {
             return availableBytes()+Math.min(credit,Long.MAX_VALUE-availableBytes());
         }
     }
+    private enum Rejection {
+        LOD_BUDGET("LOD native allocation budget reached"),
+        DRIVER_HEADROOM("Driver heap headroom reserved for near rendering"),
+        NATIVE_ALLOCATION("LOD native allocator rejected device memory");
+        final String message;
+        Rejection(String message) { this.message=message; }
+    }
     public static final class Pressure extends RuntimeException {
         private final long requestedBytes;
-        Pressure(String reason, long bytes, long live, long limit) {
-            super(reason+": request="+bytes+", LOD live="+live+", limit="+limit, null, false, false);
+        private final Rejection rejection;
+        Pressure(Rejection reason, long bytes, long live, long limit) {
+            super(reason.message+": request="+bytes+", LOD live="+live+", limit="+limit, null, false, false);
             requestedBytes=bytes;
+            rejection=reason;
         }
         public long requestedBytes() { return requestedBytes; }
+        /** Near streaming has its own window controller; it must not also erase the far fallback. */
+        public boolean mayReduceDistance() { return rejection!=Rejection.DRIVER_HEADROOM; }
     }
     private long live, peak, deferrals;
 
@@ -37,7 +48,7 @@ public final class RtLodMemory {
     public synchronized long deferralCount() { return deferrals; }
     public synchronized Pressure nativeFailure(long bytes, long limit) {
         deferrals++;
-        return new Pressure("LOD native allocator rejected device memory",bytes,live,limit);
+        return new Pressure(Rejection.NATIVE_ALLOCATION,bytes,live,limit);
     }
 
     public synchronized Ticket reserve(long bytes, long limit, Heap heap, boolean devicePreferred) {
@@ -48,7 +59,7 @@ public final class RtLodMemory {
         return new Ticket(bytes, limit, heap, devicePreferred);
     }
     private void check(long bytes, long limit, Heap heap, boolean devicePreferred) {
-        String reason=rejection(bytes,limit,heap,devicePreferred);
+        Rejection reason=rejection(bytes,limit,heap,devicePreferred);
         if(reason!=null) {
             deferrals++;
             throw new Pressure(reason,bytes,live,limit);
@@ -59,16 +70,16 @@ public final class RtLodMemory {
         if(bytes<0 || limit<0)throw new IllegalArgumentException("Negative memory size");
         return rejection(bytes,limit,heap,devicePreferred)==null;
     }
-    private String rejection(long bytes,long limit,Heap heap,boolean devicePreferred) {
+    private Rejection rejection(long bytes,long limit,Heap heap,boolean devicePreferred) {
         if (bytes > Math.max(0, limit-live)) {
-            return "LOD native allocation budget reached";
+            return Rejection.LOD_BUDGET;
         }
         // Cached driver readings already include allocations made by all allocators in this process.
         // Charge only LOD growth since that reading; never sum separate VMA heap usage estimates.
         long growth = Math.max(0, live-heap.observedLodBytes);
         long available = Math.max(0, heap.allocatorHeadroomBytes()-growth);
         if (devicePreferred && heap.driverReported && bytes > Math.max(0, available-heap.reserveBytes())) {
-            return "Driver heap headroom reserved for near rendering";
+            return Rejection.DRIVER_HEADROOM;
         }
         return null;
     }

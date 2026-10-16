@@ -19,6 +19,7 @@
 		"OptionsMixin",
 		"OptionsSubScreenAccessor",
 		"ParticleEngineAccessor",
+		"PlayerSkinRenderInfoMixin",
 		"RenderSetupAccessor",
 		"RenderTypeAccessor",
 		"TextureAtlasAccessor",
