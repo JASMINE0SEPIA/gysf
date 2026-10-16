@@ -86,3 +86,87 @@ installed pair are recorded in the local checkpoint and deployment receipt.
 The specific copper-textured variant is not independently reproduced; the epoch guard and
 finer-branch handoff address distinct mechanisms. Full player visual acceptance and broad water
 surface/optics acceptance remain separate from this terrain/cloud route and its checked invariants.
+
+## Return-trip regression, 23:45 captures
+
+The player's 23:45:32 and 23:45:37 captures show large grass/leaf/stone boxes again after moving
+away and returning. Vulkan.13 is confirmed installed. This session has no LOD allocation deferrals
+or temporary distance cap; the defect cannot be attributed to that earlier memory contraction.
+The preceding short replay did not qualify coarsening a previously loaded region and returning.
+
+Two consumer scheduling problems remain after the bootstrap admission correction: a legitimate
+distant coarse source can later need thousands of fine batches before its atomic overlap group
+retires, and an unfinished plan stays ordered around the old camera after a return trip.
+
+Consumer 0.7.2 publishes each complete source immediately, including explicit empty-source markers.
+Old ancestors remain fallback only in space without a completed finer source. The any-hit shader
+rejects their hits using an immutable signed 3D ownership hash table, appended to the same GPU
+buffer as the proxy section records. Camera, reflection, water and shadow rays share this test.
+Ownership uses the represented face's inward offset, integer world-origin addition and all three
+coordinates. Neither a partial multi-batch source nor a pending BLAS can claim ownership.
+
+The existing overlap-group completion still retires the remaining ancestors. Cancellation can
+start from a mixed parent/child selection; already published geometry and its index retain their
+graphics timeline lifetime. A camera crossing an anchor cell cancels only unpublished work and
+reorders the next plan around the current position. This does not shrink the requested horizon.
+
+The first full return replay passed its structural/lifetime checks but failed visual review:
+the returned view still contained large cherry/grass cubes after 20 seconds. Its plan captured
+1,021 targets on the return tick, while the current provider subsequently exposed 1,782 targets.
+Position and projection advance on different ticks; the initial plan could reflect the previous
+view's intentional coarse selection. The consumer now checks at bounded intervals for newly
+available nearby fine sources missing from its current plan, and cancels/replans only unpublished
+work when found. Build priority uses actual camera coordinates, rather than a 256-block anchor's
+corner. The earlier structural PASS is not treated as visual qualification.
+
+The extended ownership replay confirmed 618 previously fine sources had actually coarsened; 303
+recovered by 40 seconds and 3,902 nested ownership checks exercised real parent/child overlap.
+That establishes progressive handoff, but the visual latency was still unacceptable. Horizontal
+queue ordering put underground cells before the visible hillside. Voxy now orders 128-block quality
+bands using full 3D distance to the actual camera. Nearby newly available fine sources also bypass
+the eight-second idle refresh delay, as well as interrupting obsolete in-progress plans.
+
+The final replay uses an isolated copy of the player's save/configuration, near distance 4,
+2560x1600 output, FOV 74 and the 1,024-block LOD horizon. Full-resolution F3 inspection corrects
+the thumbnail's ambiguous minus signs: the supplied yaws are -150.4 and -100.4, not the positive
+angles used in the earlier scheduling experiments. The final route uses these actual poses. It
+moves 640 blocks east, faces away for 200 seconds and requires proof that previously published
+fine sources really became large coarse sources before returning. It records the approach after
+5/20/40 seconds and requires real fine-source recovery and nested parent/child ownership checks.
+
+The post-render probe compares the complete ownership upload with the actual published source set.
+Raw coarse-batch counts now include intentional clipped fallback; they alone are not evidence of
+visible giant blocks. Structural PASS markers from earlier experiments are not visual qualification.
+
+Recently retired complete fine sources can also remain in a non-rendered GPU cache. Its default
+ceiling is the smaller of 256 MiB and one eighth of the LOD budget; driver pressure disables it.
+Sources enter only after their last graphics use, transfer whole-source ownership on reuse and
+remain charged to the LOD memory budget. World/provider resets, shutdown and allocation pressure
+invalidate pending cache admissions and release optional owners. An explicit empty replacement
+does not resurrect old terrain. Cached detail is a temporary fallback while the latest source
+revision rebuilds, not a substitute for processing current provider data.
+
+The player's acceptance criterion is visible, continuing recovery, even if it takes some time.
+The fix therefore prioritizes publishing completed nearby sources throughout the wait. It does
+not promise instant refinement of the entire horizon or a fixed recovery deadline on all hardware.
+
+The accepted 0.7.2 return replay (`runtime-072-cache.log`) rendered 8,318 frames with 308 near
+ownership checks, 1,934,578 finer-source checks and 23,256 checks of actual nested fallback.
+Of 624 fine sources present before leaving, 611 were demonstrably replaced by large coarse
+sources while away. The return plan restored 620 complete cached sources (203 MiB), and 610 of
+the 611 coarsened baseline sources were present again at the 40-second checkpoint. These counts
+are source coverage, not a claim of pixel-perfect equality or complete horizon recovery.
+
+Inspection of the matching 5/20/40-second captures confirms that the previously loaded hillside
+and cherry trees recover promptly. Far-side coarse shelves and vertical terrain faces are still
+visible within this capture window while thousands of remaining batches stream. The second
+camera also retains coarser distant foliage. This checkpoint improves return continuity; it does
+not qualify every far source as settled or claim that all visible giant geometry has disappeared.
+The single missing baseline source also prevents claiming complete baseline recovery.
+
+All 244 consumer tests and 32 shader compilations/validations pass. The release JAR matches the
+395 runtime classes, all 32 SPIR-V modules and the mixin configuration used in this replay.
+The strict Vulkan 1.4.363 log gate passes with live DLSS-RR/NGX clear synchronization exercised,
+zero VUID/synchronization reports, zero allocation deferrals and no temporary distance cap.
+Native LOD bytes return to zero at shutdown (981,670,704-byte peak); water field and bounds cache
+also shut down at zero. These checks are not an FPS comparison or full player visual acceptance.

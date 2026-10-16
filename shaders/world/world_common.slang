@@ -183,6 +183,7 @@ public struct WorldPush {
     public float4   fogTint;
     // Current descriptor slot for the provider-owned LOD atlas; zero disables textured LOD hits.
     public uint     voxyTextureSlot;
+    public uint64_t voxyOwnershipAddr; // immutable source index, owned by the same published proxy as dhTableAddr
 };
 
 // worldPush.dimension: the sky/lighting model this frame renders with. The Overworld runs the full

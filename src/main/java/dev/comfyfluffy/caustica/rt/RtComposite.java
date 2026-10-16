@@ -1800,7 +1800,8 @@ public final class RtComposite {
                     // Biome/weather tint for the fog's scatter (WorldPush.fogTint): the game's
                     // own FOG_COLOR attribute, blended by the slider — see fogTint() above.
                     fogTint(),
-                    dev.comfyfluffy.caustica.compat.VoxyCompat.bindAtlas()
+                    dev.comfyfluffy.caustica.compat.VoxyCompat.bindAtlas(),
+                    RtDistantHorizonsTerrain.INSTANCE.ownershipAddress()
             ).write(push);
             int flushBytes = Math.max(WORLD_PUSH_SIZE, READY_MASK_OFFSET + readyMaskBytes);
             if (cloudCellsAddress != 0L) {

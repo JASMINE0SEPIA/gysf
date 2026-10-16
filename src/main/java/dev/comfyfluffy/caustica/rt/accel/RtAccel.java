@@ -133,6 +133,9 @@ public final class RtAccel {
 
     private Runnable destroyCallback;
 
+    /** Backing allocation capacity; Voxy's non-opaque BLASes do not own opacity micromaps. */
+    public long backingBytes() { return backing.size; }
+
     /** Set before publication so derived resources cannot outlive an untracked source identity. */
     public void onDestroy(Runnable callback) {
         if(destroyed||destroyCallback!=null)throw new IllegalStateException("AS destruction callback already owned");

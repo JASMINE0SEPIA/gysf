@@ -103,6 +103,8 @@ public final class RtDistantHorizonsTerrain {
     private RtAccel.Instance[] frameDhInstances = new RtAccel.Instance[0];
 
     private Proxy current;
+    private final VoxyDetailCache<GeomEntry> fineCache=new VoxyDetailCache<>();
+    private long fineCacheScope;
     private Object world;
     private int anchorX = Integer.MIN_VALUE;
     private int anchorZ = Integer.MIN_VALUE;
@@ -112,6 +114,7 @@ public final class RtDistantHorizonsTerrain {
     private long nextRevision = 1L;
     private long capturedLodRevision = -1L;
     private long nextQualityPollNanos;
+    private long nextRefinementCheckNanos;
     private long qualitySettleUntilNanos;
     private DistantHorizonsCompat.LodQuality lodQuality =
             new DistantHorizonsCompat.LodQuality(0L, 16, 2, "UNKNOWN", "UNKNOWN");
@@ -212,10 +215,42 @@ public final class RtDistantHorizonsTerrain {
         long lodRevision = DistantHorizonsCompat.lodRevision();
         boolean lodDataChanged = lodRevision != capturedLodRevision;
         boolean cameraCellChanged = ax != anchorX || az != anchorZ;
+        boolean newlyRefinedNearby = false;
+        boolean canCheckRefinement = buildSession != null && buildSession.transition != null
+                || buildSession == null && current != null && !cpuPending && !packPending && !pending;
+        if (canCheckRefinement && now >= nextRefinementCheckNanos) {
+            nextRefinementCheckNanos = now + QUALITY_POLL_NANOS;
+            Set<Long> plannedSources=buildSession!=null ? buildSession.finalSourceKeys : current.volumes.keySet();
+            // The provider's projection can advance one tick after the camera position. A plan captured
+            // on the teleport/turn tick may therefore still target the old view's coarse sources. Do not
+            // serialize that obsolete selection for minutes while current fine sources are already ready.
+            for (var mesh : VoxyCompat.meshes()) {
+                if (mesh.textured() != null && mesh.dataPointWidth() <= 2
+                        && meshDistance(mesh, (int)Math.floor(camera.x), (int)Math.floor(camera.z)) <= 256
+                        && !plannedSources.contains(mesh.key())) {
+                    newlyRefinedNearby = true;
+                    break;
+                }
+            }
+        }
+        if (newlyRefinedNearby) nextRefresh=0L;
+        if ((newlyRefinedNearby || cameraCellChanged && anchorX != Integer.MIN_VALUE)
+                && (buildSession != null || cpuPending || packPending || pending)) {
+            // A return trip must not wait behind a minutes-long plan ordered around the old camera.
+            // Published sources/index remain live; only unpublished work is cancelled and reprioritized.
+            epoch++;
+            abortBuildSession();
+            cpuPending = false;
+            anchorX = anchorZ = Integer.MIN_VALUE;
+            capturedLodRevision = -1L;
+            nextRefresh = 0L;
+            CausticaMod.LOGGER.info("Voxy RT reprioritizing unfinished LOD plan: {}",
+                    newlyRefinedNearby ? "nearby finer sources became available" : "camera movement");
+        }
         // Do not wait for a global DH "quiet" period: world generation can upload continuously for minutes.
         // Incremental source-version reuse makes periodic live snapshots cheap and lets refined LODs replace
         // coarse batches while DH is still streaming.
-        boolean refreshUploadedLods = current != null && lodDataChanged && now >= nextRefresh;
+        boolean refreshUploadedLods = current != null && (lodDataChanged || newlyRefinedNearby) && now >= nextRefresh;
 
         // Never withdraw the published RT proxy while a replacement is prepared. DH uploads can arrive in
         // bursts for many seconds; wait for a quiet window, then rebuild only changed source meshes.
@@ -241,7 +276,8 @@ public final class RtDistantHorizonsTerrain {
             nextRevision += 2L;
             Proxy reuseBase = forceSourceRebuild ? null : current;
             forceSourceRebuild = false;
-            startCpuBuild(ax, az, proxyRadius, epoch, revision, reuseBase,
+            // Anchors trigger refreshes; actual camera coordinates determine build priority and range.
+            startCpuBuild((int)Math.floor(camera.x), (int)Math.floor(camera.y), (int)Math.floor(camera.z), proxyRadius, epoch, revision, reuseBase,
                     RtMaterialRegistry.INSTANCE.requireSnapshot(), lodQuality);
         }
     }
@@ -279,6 +315,11 @@ public final class RtDistantHorizonsTerrain {
     public long tableAddress() {
         Proxy proxy = current;
         return proxy == null ? 0L : proxy.table.deviceAddress;
+    }
+
+    public long ownershipAddress() {
+        Proxy proxy = current;
+        return proxy == null || proxy.volumes.isEmpty() ? 0L : proxy.table.deviceAddress + proxy.ownershipOffset;
     }
 
     public int residentSectionCount() {
@@ -324,6 +365,7 @@ public final class RtDistantHorizonsTerrain {
 
     private void pollMemoryBudget(RtContext ctx) {
         if(!VoxyCompat.active()) return;
+        if(fineCache.bytes()>0&&fineCacheLimit(ctx)==0)clearFineCache();
         long now=System.nanoTime();
         var heap=ctx.memoryBudget();
         long limit=ctx.lodMemoryLimitBytes(heap),live=ctx.lodMemory().liveBytes();
@@ -343,6 +385,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private void deferForMemory(RtContext ctx, RtLodMemory.Pressure pressure) {
+        clearFineCache(); // optional, already retired detail must never block current terrain admission
         rejectedAllocationBytes=pressure.requestedBytes();
         abortBuildSession();
         long now=System.nanoTime();
@@ -373,7 +416,7 @@ public final class RtDistantHorizonsTerrain {
         return bootstrapComplete;
     }
 
-    private void startCpuBuild(int originX, int originZ, int proxyRadius, long taskEpoch,
+    private void startCpuBuild(int originX, int originY, int originZ, int proxyRadius, long taskEpoch,
                                long revision, Proxy base, RtMaterialRegistry.Snapshot materials,
                                DistantHorizonsCompat.LodQuality quality) {
         cpuPending = true;
@@ -382,7 +425,7 @@ public final class RtDistantHorizonsTerrain {
         // the render/server workers during a large LOD upload burst.
         cpuWorker.execute(() -> {
             try {
-                List<PlannedBatch> plan = planCapturedLods(originX, originZ, proxyRadius, taskEpoch, base, quality);
+                List<PlannedBatch> plan = planCapturedLods(originX, originY, originZ, proxyRadius, taskEpoch, base, quality);
                 cpuCompleted.add(new CpuCompleted(taskEpoch, revision + 1L, plan, materials, null, true));
             } catch (Throwable failure) {
                 cpuCompleted.add(new CpuCompleted(taskEpoch, revision + 1L, null, materials, failure, true));
@@ -395,7 +438,7 @@ public final class RtDistantHorizonsTerrain {
      * source meshes are decoded and uploaded. Batches are kept inside one source mesh so a small DH update
      * never forces a full render-distance-sized replacement.
      */
-    private List<PlannedBatch> planCapturedLods(int originX, int originZ, int proxyRadius,
+    private List<PlannedBatch> planCapturedLods(int originX, int originY, int originZ, int proxyRadius,
                                                 long taskEpoch, Proxy base,
                                                 DistantHorizonsCompat.LodQuality quality) {
         if (taskEpoch != epoch) return List.of();
@@ -404,7 +447,8 @@ public final class RtDistantHorizonsTerrain {
         if (snapshot.isEmpty()) return List.of();
         // API 5 already selects non-overlapping 3D branches; DH's X/Z-only filter would erase vertical layers.
         if(snapshot.stream().noneMatch(mesh -> mesh.textured()!=null)) snapshot = removeFullyCoveredCoarseMeshes(snapshot);
-        int qualityBandBlocks = switch (Math.clamp(quality.horizontalQualityRank(), 0, 4)) {
+        boolean textured=snapshot.stream().anyMatch(mesh->mesh.textured()!=null);
+        int qualityBandBlocks = textured ? 128 : switch (Math.clamp(quality.horizontalQualityRank(), 0, 4)) {
             case 0 -> 128;
             case 1 -> 192;
             case 2 -> 256;
@@ -412,8 +456,8 @@ public final class RtDistantHorizonsTerrain {
             default -> 512;
         };
         snapshot.sort((a, b) -> {
-            int ad = meshDistance(a, originX, originZ);
-            int bd = meshDistance(b, originX, originZ);
+            int ad = textured ? volumeDistance(a, originX, originY, originZ) : meshDistance(a, originX, originZ);
+            int bd = textured ? volumeDistance(b, originX, originY, originZ) : meshDistance(b, originX, originZ);
             int byBand = Integer.compare(ad / qualityBandBlocks, bd / qualityBandBlocks);
             if (byBand != 0) return byBand;
             // Within the visible quality band, build the finest captured VBOs first. The previous coarse-first
@@ -515,6 +559,11 @@ public final class RtDistantHorizonsTerrain {
         int cx = mesh.originX() + mesh.width() / 2;
         int cz = mesh.originZ() + mesh.width() / 2;
         return Math.max(Math.abs(cx - originX), Math.abs(cz - originZ));
+    }
+
+    private static int volumeDistance(DistantHorizonsCompat.LodMesh mesh,int x,int y,int z) {
+        return VoxySourceOwnership.distanceTo(new VoxyLodTransition.Volume(mesh.key(),mesh.originX(),
+                mesh.originY(),mesh.originZ(),mesh.width()),x,y,z);
     }
 
     /**
@@ -864,6 +913,9 @@ public final class RtDistantHorizonsTerrain {
             return;
         }
         buildSession = new BuildSession(taskEpoch, revision, new ArrayDeque<>(plan), materials, current);
+        if(buildSession.restoredFineCount>0)CausticaMod.LOGGER.info(
+                "Voxy restored cached fine detail: {} complete sources, {} MiB before rebuilding",
+                buildSession.restoredFineCount,buildSession.restoredFineBytes>>20);
         CausticaMod.LOGGER.info(
                 "DH progressive refresh started: current RT proxy remains active while {} planned batches stream in",
                 plan.size());
@@ -871,6 +923,48 @@ public final class RtDistantHorizonsTerrain {
         // Their native bytes stay charged until the graphics retirement callback actually destroys them.
         if(buildSession.transition!=null && buildSession.coverageChanged) publishBuildSession(ctx,false);
         serviceBuildSession(ctx);
+    }
+
+    private static long sourceBytes(List<GeomEntry> entries) {
+        long bytes=0;
+        for(var e:entries) {
+            var g=e.geom;
+            bytes+=g.uvs.size+g.material.size+g.blas.backingBytes();
+            if(g.water!=null)bytes+=g.water.size;
+            if(g.waterBlas!=null)bytes+=g.waterBlas.backingBytes();
+        }
+        return bytes;
+    }
+
+    private static void destroyCached(VoxyDetailCache.Entry<GeomEntry> entry) {
+        for(var batch:entry.batches())batch.geom.destroy();
+    }
+
+    private void clearFineCache() {
+        synchronized(fineCache) {
+            fineCacheScope++;
+            for(var entry:fineCache.clear())destroyCached(entry);
+        }
+    }
+
+    private long fineCacheLimit(RtContext ctx) {
+        var heap=ctx.memoryBudget();
+        if(heap.driverReported()&&heap.allocatorHeadroomBytes()<heap.reserveBytes()*2)return 0;
+        return Math.min(Math.clamp(Integer.getInteger("gysf.rt.fineLodCacheMiB",256),0,512)*RtLodMemory.MIB,
+                ctx.lodMemoryLimitBytes(heap)/8);
+    }
+
+    private List<VoxyDetailCache.Entry<GeomEntry>> cacheCandidates(Proxy old,Proxy next) {
+        List<VoxyDetailCache.Entry<GeomEntry>> result=new ArrayList<>();
+        for(var source:old.sources.entrySet()) {
+            var entries=source.getValue().entries;
+            var volume=entries.getFirst().volume;
+            if(volume==null||volume.width()>64||next.volumes.containsKey(source.getKey()))continue;
+            if(next.volumes.values().stream().noneMatch(v->v.width()>volume.width()
+                    &&VoxySourceOwnership.contains(v,volume)))continue;
+            result.add(new VoxyDetailCache.Entry<>(volume,source.getValue().version,entries,sourceBytes(entries)));
+        }
+        return result;
     }
 
     private void serviceBuildSession(RtContext ctx) {
@@ -899,6 +993,7 @@ public final class RtDistantHorizonsTerrain {
         // Only the final checkpoint drops batches that DH no longer reports. Intermediate snapshots keep
         // the old geometry for not-yet-resolved sources, so progressive publication never creates holes.
         session.workingEntries.keySet().removeIf(key -> !session.finalBatchKeys.contains(key));
+        session.workingVolumes.keySet().removeIf(key -> !session.finalSourceKeys.contains(key));
         publishBuildSession(ctx, true);
     }
 
@@ -1101,6 +1196,16 @@ public final class RtDistantHorizonsTerrain {
             return;
         }
         VoxyLodTransition.Swap swap = session.transition.completeBatch(batch.sourceKey);
+        if (complete) {
+            // A whole source is safe to expose immediately. Coarser ancestors remain fallback only:
+            // the immutable GPU index clips them exactly where this finer (possibly empty) cube owns.
+            var volume = batch.volume;
+            Set<Long> replaced = VoxySourceOwnership.activate(session.workingVolumes, volume);
+            session.workingEntries.values().removeIf(e -> replaced.contains(e.sourceKey));
+            for (GeomEntry entry : session.stagedEntries.getOrDefault(batch.sourceKey, List.of()))
+                session.workingEntries.put(entry.batchKey, entry);
+            session.readyChanges = true;
+        }
         if (swap == null) return;
         boolean replacement = session.workingEntries.values().stream().anyMatch(e -> {
             if (!swap.retired().contains(e.sourceKey)) return false;
@@ -1109,9 +1214,11 @@ public final class RtDistantHorizonsTerrain {
                     || staged.getFirst().sourceVersion != e.sourceVersion;
         });
         session.workingEntries.values().removeIf(e -> swap.retired().contains(e.sourceKey));
+        swap.retired().forEach(session.workingVolumes::remove);
         for (long source : swap.activated()) {
             List<GeomEntry> staged = session.stagedEntries.remove(source);
             if (staged != null) for (GeomEntry entry : staged) session.workingEntries.put(entry.batchKey, entry);
+            session.workingVolumes.put(source, session.nextVolumes.get(source));
         }
         session.readyChanges = true;
         // Topology replacement can expose refined detail immediately. New independent sources and
@@ -1148,7 +1255,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private void maybePublishProgress(RtContext ctx, BuildSession session) {
-        if (session != buildSession || session.workingEntries.isEmpty()) return;
+        if (session != buildSession) return;
         if (session.transition != null && !session.readyChanges && !session.coverageChanged) return;
         int unpublished = session.builtCount - session.publishedBuiltCount;
         int threshold = current == null && !session.publishedAny
@@ -1174,7 +1281,12 @@ public final class RtDistantHorizonsTerrain {
                     if (version != null && version != e.sourceVersion)
                         throw new IllegalStateException("Mixed Voxy source revisions in a published proxy");
                 }
-                VoxyLodTransition.validatePartition(List.copyOf(volumes.values()));
+                for (var volume : volumes.values())
+                    if (!volume.equals(session.workingVolumes.get(volume.key())))
+                        throw new IllegalStateException("Voxy geometry has no matching ownership volume");
+                // Nested sources are intentional fallback. The index rejects duplicate keys/bounds;
+                // the shader selects the finest complete cube for every radiance and shadow hit.
+                new VoxySourceOwnership(session.workingVolumes.values());
                 voxyCoverageChecks++;
             }
             int count = entries.size();
@@ -1185,9 +1297,11 @@ public final class RtDistantHorizonsTerrain {
                 }
                 return;
             }
+            VoxySourceOwnership ownership = new VoxySourceOwnership(session.workingVolumes.values());
+            long ownershipOffset = (Math.max((long)RtSectionTable.SECTION_ENTRY_BYTES,
+                    Math.multiplyExact((long)RtSectionTable.SECTION_ENTRY_BYTES, count)) + 15L) & ~15L;
             try(var budgetScope=session.transition!=null ? ctx.lodMetadata() : null) {
-                table = ctx.createBuffer(Math.max((long)RtSectionTable.SECTION_ENTRY_BYTES,
-                                Math.multiplyExact((long)RtSectionTable.SECTION_ENTRY_BYTES, count)), VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true,
+                table = ctx.createBuffer(ownershipOffset + ownership.byteSize(), VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true,
                         "Distant Horizons RT proxy table " + count + " batches");
             }
             long p = table.mapped;
@@ -1195,13 +1309,15 @@ public final class RtDistantHorizonsTerrain {
                 RtSectionTable.SectionGeom geom = entries.get(section).geom;
                 RtSectionTable.writeRecord(p+(long)section*RtSectionTable.SECTION_ENTRY_BYTES,geom);
             }
+            ownership.write(MemoryUtil.memByteBuffer(p + ownershipOffset, ownership.byteSize()));
             table.flush();
             if (session.lastBuild != null) {
                 ctx.gpuExecutor().markPublished(session.lastBuild);
                 session.lastBuild = null;
             }
 
-            Proxy next = new Proxy(session.revision, entries, table, finished);
+            Proxy next = new Proxy(session.revision, entries, table, finished,
+                    Map.copyOf(session.workingVolumes), ownershipOffset);
             Proxy old = current;
             current = next;
             instanceProxy = null;
@@ -1216,8 +1332,23 @@ public final class RtDistantHorizonsTerrain {
 
             if (old != null) {
                 Set<RtSectionTable.SectionGeom> retained = next.geomIdentitySet();
+                long cacheLimit=fineCacheLimit(ctx);
+                var candidates=cacheLimit>0 ? cacheCandidates(old,next) : List.<VoxyDetailCache.Entry<GeomEntry>>of();
+                for(var candidate:candidates)for(var e:candidate.batches())retained.add(e.geom);
+                long cacheScope;
+                synchronized(fineCache){cacheScope=fineCacheScope;}
                 var lastUse = ctx.gpuExecutor().latestGraphicsUse();
-                ctx.gpuExecutor().retireAfterGraphics(lastUse, () -> old.destroyExcept(retained));
+                ctx.gpuExecutor().retireAfterGraphics(lastUse, () -> {
+                    old.destroyExcept(retained);
+                    // Retired sources become cache-owned only after their last graphics use completes.
+                    // Scope invalidation also rejects callbacks queued before reset/memory eviction.
+                    synchronized(fineCache) {
+                        for(var candidate:candidates) {
+                            if(cacheScope!=fineCacheScope)destroyCached(candidate);
+                            else for(var evicted:fineCache.put(candidate,cacheLimit))destroyCached(evicted);
+                        }
+                    }
+                });
             }
 
             if (finished) {
@@ -1250,6 +1381,7 @@ public final class RtDistantHorizonsTerrain {
             session.owned.clear();
             session.stagedEntries.clear();
             session.workingEntries.clear();
+            session.workingVolumes.clear();
             session.remaining.clear();
         }
     }
@@ -1262,6 +1394,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private void reset(RtContext ctx, boolean clearCapturedLods) {
+        clearFineCache();
         memoryController.reset(); rejectedAllocationBytes=0; VoxyCompat.limitDistance(0);
         epoch++;
         anchorX = anchorZ = Integer.MIN_VALUE;
@@ -1291,6 +1424,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     public void shutdown(RtContext ctx) {
+        clearFineCache();
         memoryController.reset(); rejectedAllocationBytes=0; VoxyCompat.limitDistance(0);
         epoch++;
         synchronized (activeLock) {
@@ -1357,12 +1491,14 @@ public final class RtDistantHorizonsTerrain {
         }
     }
 
-    private static final class BuildSession {
+    private final class BuildSession {
         final long epoch;
         final long revision;
         final ArrayDeque<PlannedBatch> remaining;
         final RtMaterialRegistry.Snapshot materials;
         final LinkedHashMap<Long, GeomEntry> workingEntries = new LinkedHashMap<>();
+        final Map<Long, VoxyLodTransition.Volume> workingVolumes = new LinkedHashMap<>();
+        final Map<Long, VoxyLodTransition.Volume> nextVolumes = new LinkedHashMap<>();
         final Set<Long> finalBatchKeys = new HashSet<>();
         final Set<Long> finalSourceKeys = new HashSet<>();
         final Map<Long, SourceProgress> sourceProgress = new HashMap<>();
@@ -1379,6 +1515,8 @@ public final class RtDistantHorizonsTerrain {
         boolean publishedAny;
         boolean coverageChanged;
         boolean readyChanges;
+        int restoredFineCount;
+        long restoredFineBytes;
 
         BuildSession(long epoch, long revision, ArrayDeque<PlannedBatch> remaining,
                      RtMaterialRegistry.Snapshot materials, Proxy base) {
@@ -1388,6 +1526,7 @@ public final class RtDistantHorizonsTerrain {
             this.materials = materials;
             if (base != null) {
                 for (GeomEntry entry : base.entries) workingEntries.put(entry.batchKey, entry);
+                workingVolumes.putAll(base.volumes);
             }
             int builds = 0;
             for (PlannedBatch batch : remaining) {
@@ -1401,14 +1540,26 @@ public final class RtDistantHorizonsTerrain {
             }
             totalBuildCount = builds;
             if (remaining.stream().allMatch(b -> b.volume != null)) {
-                Map<Long, VoxyLodTransition.Volume> old = new LinkedHashMap<>(), next = new LinkedHashMap<>();
-                for (GeomEntry e : workingEntries.values()) if (e.volume != null) old.put(e.sourceKey, e.volume);
-                for (PlannedBatch b : remaining) next.put(b.sourceKey, b.volume);
+                for (PlannedBatch b : remaining) nextVolumes.put(b.sourceKey, b.volume);
+                for(PlannedBatch b:remaining) {
+                    if(b.volume.width()>64||workingVolumes.containsKey(b.sourceKey)
+                            ||b.reused==null&&b.slices.isEmpty())continue;
+                    var cached=fineCache.take(b.sourceKey);
+                    if(cached==null)continue;
+                    if(!cached.volume().equals(b.volume)){destroyCached(cached);continue;}
+                    for(var entry:cached.batches()) {
+                        workingEntries.put(entry.batchKey,entry);owned.add(entry.geom);
+                    }
+                    workingVolumes.put(b.sourceKey,cached.volume());
+                    coverageChanged=true;restoredFineCount++;restoredFineBytes+=cached.bytes();
+                }
                 Map<Long, Integer> batchCounts = new HashMap<>();
                 sourceProgress.forEach((key, progress) -> batchCounts.put(key, progress.totalBatches));
-                transition = new VoxyLodTransition(List.copyOf(old.values()), List.copyOf(next.values()), batchCounts);
+                transition = new VoxyLodTransition(List.copyOf(workingVolumes.values()),
+                        List.copyOf(nextVolumes.values()), batchCounts, true);
                 Set<Long> obsolete = transition.obsoleteSources();
-                coverageChanged = workingEntries.values().removeIf(e -> obsolete.contains(e.sourceKey));
+                coverageChanged |= workingEntries.values().removeIf(e -> obsolete.contains(e.sourceKey));
+                coverageChanged |= workingVolumes.keySet().removeIf(obsolete::contains);
             } else transition = null;
         }
 
@@ -1644,11 +1795,16 @@ public final class RtDistantHorizonsTerrain {
         final List<GeomEntry> entries;
         final Map<Long, SourceState> sources;
         final RtBuffer table;
+        final Map<Long, VoxyLodTransition.Volume> volumes;
+        final long ownershipOffset;
 
-        Proxy(long revision, List<GeomEntry> entries, RtBuffer table, boolean sourceSetComplete) {
+        Proxy(long revision, List<GeomEntry> entries, RtBuffer table, boolean sourceSetComplete,
+              Map<Long, VoxyLodTransition.Volume> volumes, long ownershipOffset) {
             this.revision = revision;
             this.entries = entries;
             this.table = table;
+            this.volumes = volumes;
+            this.ownershipOffset = ownershipOffset;
             HashMap<Long, ArrayList<GeomEntry>> grouped = new HashMap<>();
             for (GeomEntry entry : entries) {
                 grouped.computeIfAbsent(entry.sourceKey, ignored -> new ArrayList<>()).add(entry);

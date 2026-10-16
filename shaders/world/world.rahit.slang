@@ -77,6 +77,36 @@ bool vanillaRtSectionReady(float3 hitPos, float3 ownershipNormal) {
     return word < mask[6] && (mask[8 + word] & (1u << (bit & 31u))) != 0u;
 }
 
+// A coarse ancestor remains available while other children build, but cannot occlude any completed
+// finer source. Empty finer sources own space too. The header/table are published atomically with
+// dhTableAddr and retired on the same graphics timeline; no pending BLAS enters this index.
+bool voxyFinerSourceReady(float3 hitPos, float3 ownershipNormal, uint level) {
+    if (level == 0u) return false;
+    WorldPush wp = ConstPtr<WorldPush>(pc.worldPushAddr)[0];
+    if (wp.voxyOwnershipAddr == 0) return false;
+    ConstPtr<uint4> index = ConstPtr<uint4>(wp.voxyOwnershipAddr);
+    uint4 header = index[0];
+    if (header.y != 0x56584f57u) return false;
+    // Integer origin addition preserves block ownership at large world coordinates across rebases.
+    int3 block = int3(floor(hitPos - ownershipNormal * 0.01)) + wp.sharcGridOrigin.xyz;
+    for (uint finer = 0u; finer < level; ++finer) {
+        uint width = 32u << finer;
+        // Aligned powers of two: bit masking implements floor division for signed negative blocks.
+        int3 origin = block & int3(~(width - 1u));
+        uint h = asuint(origin.x) * 0x8da6b343u ^ asuint(origin.y) * 0xd8163841u
+                ^ asuint(origin.z) * 0xcb1ab31fu ^ width * 0x9e3779b9u;
+        h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15;
+        uint slot = h & header.x;
+        for (uint probes = 0u; probes <= header.x; ++probes) {
+            uint4 value = index[slot + 1u];
+            if (value.w == 0u) break;
+            if (value.w == width && all(asint(value.xyz) == origin)) return true;
+            slot = (slot + 1u) & header.x;
+        }
+    }
+    return false;
+}
+
 [shader("anyhit")]
 void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) {
     uint pid = PrimitiveIndex();
@@ -100,6 +130,11 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
         if (vanillaRtSectionReady(hitPos, ownershipNormal)) {
             // Suppress this exact LOD section only after its real RT replacement is published, so the
             // transition ring never shows a hole or double geometry.
+            IgnoreHit();
+            return;
+        }
+
+        if (textured && voxyFinerSourceReady(hitPos, ownershipNormal, pr.aux1)) {
             IgnoreHit();
             return;
         }

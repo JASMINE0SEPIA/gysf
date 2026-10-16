@@ -34,10 +34,15 @@ final class VoxyLodTransition {
     }
 
     VoxyLodTransition(List<Volume> previous, List<Volume> desired, Map<Long, Integer> batchCounts) {
+        this(previous, desired, batchCounts, false);
+    }
+
+    VoxyLodTransition(List<Volume> previous, List<Volume> desired, Map<Long, Integer> batchCounts,
+                      boolean nestedFallback) {
         int n = previous.size(), total = n + desired.size();
         int[] parent = new int[total];
         for (int i = 0; i < total; i++) parent[i] = i;
-        Map<Bounds, Integer> oldIndex = index(previous), nextIndex = index(desired);
+        Map<Bounds, Integer> oldIndex = index(previous, nestedFallback), nextIndex = index(desired);
         int maxWidth = 1;
         for (Volume v : previous) maxWidth = Math.max(maxWidth, v.width);
         for (Volume v : desired) maxWidth = Math.max(maxWidth, v.width);
@@ -77,6 +82,10 @@ final class VoxyLodTransition {
     }
 
     private static Map<Bounds, Integer> index(List<Volume> volumes) {
+        return index(volumes, false);
+    }
+
+    private static Map<Bounds, Integer> index(List<Volume> volumes, boolean allowNested) {
         Map<Bounds, Integer> result = new HashMap<>();
         Set<Long> keys = new HashSet<>();
         int maxWidth = volumes.stream().mapToInt(Volume::width).max().orElse(1);
@@ -85,7 +94,7 @@ final class VoxyLodTransition {
             if (!keys.add(v.key) || result.put(v.bounds(), i) != null)
                 throw new IllegalArgumentException("Duplicate Voxy source");
         }
-        for (Volume v : volumes) {
+        for (Volume v : allowNested ? List.<Volume>of() : volumes) {
             for (Bounds b = v.bounds(); b.width < maxWidth;) {
                 b = b.parent();
                 if (result.containsKey(b)) throw new IllegalArgumentException("Overlapping Voxy selection");

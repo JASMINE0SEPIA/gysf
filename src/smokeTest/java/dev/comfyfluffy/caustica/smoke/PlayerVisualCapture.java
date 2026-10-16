@@ -12,6 +12,8 @@ import java.util.*;
 /** Replays the reported cameras against a copied save. Never opens a player's PCL directory. */
 final class PlayerVisualCapture {
     private static final boolean LIFECYCLE=Boolean.getBoolean("gysf.smoke.playerVisualLifecycle");
+    private static final boolean RETURN_ROUTE=Boolean.getBoolean("gysf.smoke.playerReturnRoute");
+    private static final boolean EXACT_CAMERAS=Boolean.getBoolean("gysf.smoke.playerReturnCamerasOnly");
     private int ticks, worldTicks, exitTicks;
     private boolean opened, finished;
     private int maxHeld;
@@ -31,8 +33,8 @@ final class PlayerVisualCapture {
             client.options.renderDistance().set(Integer.getInteger("gysf.smoke.playerVisualStartDistance",6));
             client.options.simulationDistance().set(24);
             client.options.cloudStatus().set(CloudStatus.OFF);
-            client.options.fov().set(70);
-            client.getWindow().setWindowed(1792,1120);
+            client.options.fov().set(RETURN_ROUTE?74:70);
+            client.getWindow().setWindowed(RETURN_ROUTE?2560:1792,RETURN_ROUTE?1600:1120);
             client.createWorldOpenFlows().openWorld("gysf-player-visual",()->{throw new IllegalStateException("Replay cancelled");});
         }
         if(client.level==null || client.player==null)return;
@@ -42,6 +44,7 @@ final class PlayerVisualCapture {
         if(RtComposite.INSTANCE.hasFailed())throw new IllegalStateException("RT compositor failed");
         var terrain=dev.comfyfluffy.caustica.rt.terrain.RtTerrain.currentOrNull();
         if(terrain!=null)maxHeld=Math.max(maxHeld,terrain.retainedHandoffSectionCount());
+        if(RETURN_ROUTE) {if(EXACT_CAMERAS)exactCameras(client);else returnRoute(client);return;}
         switch(worldTicks) {
             case 80 -> {
                 client.player.connection.sendCommand("gamemode spectator");
@@ -80,11 +83,56 @@ final class PlayerVisualCapture {
             case 5040 -> {if(LIFECYCLE)finish(client);}
         }
     }
+    private void exactCameras(Minecraft client) {
+        switch(worldTicks) {
+            case 80 -> {
+                client.player.connection.sendCommand("gamemode spectator");
+                client.player.connection.sendCommand("time set 2927");
+                client.player.connection.sendCommand("gamerule minecraft:advance_time false");
+                teleport(client,"-257.349 240.40761 174.822 -150.4 51.5");
+            }
+            case 1000 -> capture(client,"exact-01-player-234532");
+            case 1010 -> teleport(client,"-199.861 240.40761 173.535 -100.4 24.9");
+            case 1810 -> capture(client,"exact-02-player-234537");
+            case 1890 -> finish(client);
+        }
+    }
+    private void returnRoute(Minecraft client) {
+        switch(worldTicks) {
+            case 80 -> {
+                client.player.connection.sendCommand("gamemode spectator");
+                client.player.connection.sendCommand("time set 2927");
+                client.player.connection.sendCommand("gamerule minecraft:advance_time false");
+                teleport(client,"-257.349 240.40761 174.822 -150.4 51.5");
+            }
+            case 1000 -> {
+                capture(client,"return-01-loaded");
+                dev.comfyfluffy.caustica.rt.terrain.NearOwnershipSmokeProbe.recordBeforeAway();
+            }
+            case 1010 -> teleport(client,"382.651 240.40761 174.822 -90 24.9");
+            case 5000 -> {
+                capture(client,"return-02-away-facing-out");
+                dev.comfyfluffy.caustica.rt.terrain.NearOwnershipSmokeProbe.requireCoarsened();
+            }
+            case 5010 -> teleport(client,"-257.349 240.40761 174.822 -150.4 51.5");
+            case 5110 -> capture(client,"return-03-approach-5s");
+            case 5410 -> capture(client,"return-04-approach-20s");
+            case 5810 -> {
+                capture(client,"return-05-approach-40s");
+                dev.comfyfluffy.caustica.rt.terrain.NearOwnershipSmokeProbe.requireRecovered();
+            }
+            case 5820 -> teleport(client,"-199.861 240.40761 173.535 -100.4 24.9");
+            case 6220 -> capture(client,"return-06-second-camera");
+            case 6300 -> finish(client);
+        }
+    }
     private void finish(Minecraft client) {
         long checks=dev.comfyfluffy.caustica.rt.terrain.NearOwnershipSmokeProbe.checks();
         if(checks<30)throw new IllegalStateException("Insufficient published near/LOD ownership checks");
         if(LIFECYCLE&&(!sawNether||!returned))throw new IllegalStateException("Missing dimension round trip");
-        System.out.println("GYSF_PLAYER_VISUAL: PASS frames="+RtComposite.frameCounter()+" ownershipChecks="+checks+" maxHeldNear="+maxHeld+" lifecycle="+LIFECYCLE);
+        long finerChecks=dev.comfyfluffy.caustica.rt.terrain.NearOwnershipSmokeProbe.finerChecks();
+        if(RETURN_ROUTE&&finerChecks==0)throw new IllegalStateException("Missing fine-source GPU ownership checks");
+        System.out.println("GYSF_PLAYER_VISUAL: PASS frames="+RtComposite.frameCounter()+" ownershipChecks="+checks+" finerOwnershipChecks="+finerChecks+" maxHeldNear="+maxHeld+" lifecycle="+LIFECYCLE+" returnRoute="+RETURN_ROUTE+" exactCamerasOnly="+EXACT_CAMERAS);
         finished=true;client.disconnectWithSavingScreen();
     }
     private static void teleport(Minecraft client,String position) {client.player.connection.sendCommand("tp @s "+position);}
