@@ -22,6 +22,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private static final boolean PERFORMANCE=Boolean.getBoolean("gysf.smoke.performance");
     private static final String WORLD=dev.comfyfluffy.caustica.rt.terrain.WaterSourceSmokeProbe.ENABLED?"gysf-water-source-26.3"
             :Boolean.getBoolean("gysf.smoke.fluidMip")?"gysf-fluid-mip-26.3"
+            :WaterGuideCapture.VARIED?"gysf-varied-water-26.3"
             :CLEAN_WATER?"gysf-clean-water-26.3":"gysf-26.3-smoke";
     private static final boolean TEXTURE_FIXTURE=Boolean.getBoolean("gysf.smoke.textureFixture");
     private static final boolean WATER_MATRIX=Boolean.getBoolean("gysf.smoke.waterMatrix");
@@ -62,6 +63,8 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private final WaterDomainSmokeProbe waterDomain=new WaterDomainSmokeProbe();
     private final WaterGuideCapture waterGuides=new WaterGuideCapture();
     @Override public void onInitializeClient() {
+        if(WaterGuideCapture.VARIED&&(!WaterGuideCapture.ENABLED||WaterGuideCapture.OPTICS||PERFORMANCE||WaterCacheLifecycle.ENABLED))
+            throw new IllegalStateException("Varied water requires its own mixed/near guide comparison");
         if(dev.comfyfluffy.caustica.rt.terrain.WaterSourceSmokeProbe.ENABLED&&(!CLEAN_WATER||!WATER_COMPARE||FLUID_MIP
                 ||FLUID_TOPOLOGY||WATER_MATRIX||PERFORMANCE||WaterCacheLifecycle.ENABLED||WaterGuideCapture.ENABLED||WaterCameraCapture.ENABLED||WaterSequenceCapture.ENABLED))
             throw new IllegalStateException("Source capture requires its own clean comparison world");
@@ -111,6 +114,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
         }
         if (client.level==null || client.player==null) return;
         worldTicks++;
+        waterGuides.prepareFixture(client,worldTicks);
         dev.comfyfluffy.caustica.rt.terrain.WaterSourceSmokeProbe.tick(client,worldTicks);
         if(WaterCacheLifecycle.ENABLED) {
             if(WaterCacheLifecycle.tick(client,worldTicks)){finished=true;client.disconnectWithSavingScreen();}
@@ -244,6 +248,7 @@ public final class GysfSmokeClient implements ClientModInitializer {
                     if(!level.getFluidState(new net.minecraft.core.BlockPos(64,110,z)).is(net.minecraft.tags.FluidTags.WATER)
                             || !level.getBlockState(new net.minecraft.core.BlockPos(64,108,z)).is(net.minecraft.world.level.block.Blocks.QUARTZ_BLOCK)) return false;
                 }
+                if(WaterGuideCapture.VARIED)return WaterGuideCapture.verifyFixture(level);
                 if(CLEAN_WATER) for(int x=47;x<=80;x++) for(int z=15;z<=145;z++) for(int y=112;y<=143;y++)
                     if(!level.getBlockState(new net.minecraft.core.BlockPos(x,y,z)).isAir()) return false;
                 return true;
@@ -252,7 +257,8 @@ public final class GysfSmokeClient implements ClientModInitializer {
         if (worldTicks==890 && WATER_FIXTURE) {
             if(waterFixtureReady==null || !waterFixtureReady.isDone() || !waterFixtureReady.join())
                 throw new IllegalStateException("Water fixture blocks were not placed across the complete test lane");
-            if(CLEAN_WATER) System.out.println("GYSF_CLEAN_WATER: verified air above pool through Y=143; isolated server frozen");
+            if(CLEAN_WATER) System.out.println(WaterGuideCapture.VARIED?"GYSF_VARIED_WATER: verified source blocks and covers; isolated server frozen"
+                    :"GYSF_CLEAN_WATER: verified air above pool through Y=143; isolated server frozen");
             boolean near=dev.comfyfluffy.caustica.rt.terrain.RtTerrain.isSectionReady(new net.minecraft.core.BlockPos(64,110,32));
             boolean far=dev.comfyfluffy.caustica.rt.terrain.RtTerrain.isSectionReady(new net.minecraft.core.BlockPos(64,110,128));
             if(!near || far!=WATER_NEAR_REFERENCE) throw new IllegalStateException("Unexpected water near/LOD ownership: "+near+"/"+far+", reference="+WATER_NEAR_REFERENCE);

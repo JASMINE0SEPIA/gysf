@@ -5,6 +5,8 @@ import net.minecraft.world.level.block.state.BlockState;
 /** Immutable CPU data copied from optional API 5; no provider types or native resources escape here. */
 public final class VoxySceneData {
     private VoxySceneData() {}
+    /** Bit 32 preserves authored translucency when the provider optimizes raster alpha to cutout. */
+    public static boolean isGlass(int flags,boolean fluid) {return !fluid&&(flags&(4|32))!=0;}
 
     public record Model(int id, int down, int up, int north, int south, int west, int east,
                         int flags, int tint, BlockState state, boolean fluid, boolean water,

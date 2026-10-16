@@ -18,7 +18,7 @@ param(
     [string]$WaterHitShaderBaseline='',
     [ValidatePattern('^[01](?:,[01])*$')][string]$WaterShaderSequence='0',
     [string]$Label=('perf-'+(Get-Date -Format 'yyyyMMdd-HHmmss')),
-    [string]$ProviderJar='../voxy-vulkan-26.3/build/libs/voxy-vulkan-0.2.20-26.3-vulkan.10-dev-d4097ba.jar'
+    [string]$ProviderJar='../voxy-vulkan-26.3/build/libs/voxy-vulkan-0.2.20-26.3-vulkan.11-dev-15ff198.jar'
 )
 $ErrorActionPreference='Stop'
 if($Label -notmatch '^[A-Za-z0-9_-]+$'){throw 'Use a simple unique output label'}

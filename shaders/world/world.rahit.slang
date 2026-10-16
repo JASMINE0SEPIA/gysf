@@ -119,7 +119,8 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
             if (dhSurface != DH_SURFACE_WATER) {
                 voxySample = voxyTexel(pr, voxyUv(sec, tri, bary), 0u, RayTCurrent(),
                         entityAlbedoTex[NonUniformResourceIndex(slot)]);
-                if (voxySample.a < (((pr.flags & 32u) != 0u) ? ALPHA_CUTOFF : 0.01)) {
+                bool glass = dhSurface == DH_SURFACE_GLASS || dhSurface == DH_SURFACE_EMISSIVE_GLASS;
+                if (!glass && voxySample.a < (((pr.flags & 32u) != 0u) ? ALPHA_CUTOFF : 0.01)) {
                     IgnoreHit();
                     return;
                 }

@@ -554,8 +554,11 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
 
         if (dhGlass || dhEmissiveGlass) {
             float opticalAlpha = textured ? voxyGlassAlpha(voxySample.a) : clamp(asfloat(dhEmissiveGlass ? dpr.aux1 : dpr.aux0), 0.04, 0.80);
-            float3 glassTint = glassTransmissionFilter(dhColour, opticalAlpha);
-            float ior = max(dhHeader.params.z, 1.45);
+            // Real Voxy block faces use the same material/texel filter as near glass. The legacy
+            // colour proxy keeps its separate coverage approximation.
+            float3 glassTint = textured ? lerp(float3(1.0),dhColour,voxySample.a)
+                    : glassTransmissionFilter(dhColour, opticalAlpha);
+            float ior = max(dhHeader.params.z, textured ? 1.0 : 1.45);
             float f0Base = (ior - 1.0) / (ior + 1.0);
             float f0Scalar = f0Base * f0Base;
             payload.albedo = half3(glassTint);
@@ -564,8 +567,9 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
             payload.motionPrev = half3(0.0h, 0.0h, 0.0h);
             payload.f0 = half3(float3(f0Scalar, f0Scalar, f0Scalar));
             payloadSetPacked(payload, MATERIAL_DIELECTRIC,
-                    clamp(dhHeader.params.x, 0.025, 0.16), 0.0, dhEmission, 0.0,
-                    ior, max(dhHeader.params.w, 0.97),
+                    textured ? dhHeader.params.x : clamp(dhHeader.params.x, 0.025, 0.16),
+                    textured ? dhHeader.params.y : 0.0, dhEmission, 0.0,
+                    ior, textured ? dhHeader.params.w : max(dhHeader.params.w, 0.97),
                     dhEmissiveGlass ? EMISSION_SOURCE_UNIFORM : EMISSION_SOURCE_NONE);
             payloadSetDielectric(payload, MATERIAL_DIELECTRIC,
                     dot(WorldRayDirection(), sourceNormal) < 0.0);

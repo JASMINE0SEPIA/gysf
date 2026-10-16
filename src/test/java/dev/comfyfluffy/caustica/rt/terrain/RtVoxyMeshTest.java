@@ -22,6 +22,29 @@ final class RtVoxyMeshTest {
         return RtVoxyMesh.pack(List.of(new RtVoxyMesh.Slice(mesh,0,mesh.textured().quadCount())),1024,-512,m -> 42);
     }
 
+    @Test void authoredTransparencySurvivesRasterCutoutWithoutClassifyingFluidsOrFoliageAsGlass() {
+        assertTrue(VoxySceneData.isGlass(32,false));
+        assertTrue(VoxySceneData.isGlass(4,false),"legacy flag remains supported");
+        assertFalse(VoxySceneData.isGlass(32|4|16,true));
+        for(int flags:new int[]{0,1,2,8,16,1|2|8})assertFalse(VoxySceneData.isGlass(flags,false));
+    }
+
+    @Test void glassKeepsVolumeFacesAndMatchesNearInsetAtEveryOrientation() {
+        var glass=new VoxySceneData.Model(7,FULL|(1<<22),FULL|(1<<22),FULL|(1<<22),FULL|(1<<22),FULL|(1<<22),FULL|(1<<22),32,-1,null,false,false,true,0);
+        float inset=dev.comfyfluffy.caustica.rt.material.RtDielectrics.SURFACE_INSET;
+        for(int face=0;face<6;face++) {
+            var packed=pack(source(new long[]{raw(face,7)},glass));
+            int axis=face<2?1:face<4?2:0;
+            float[] origin={0,-64,256};float expected=origin[axis]+((face&1)==0?inset:1-inset);
+            for(int v=0;v<4;v++)assertEquals(expected,packed.positions()[v*3+axis],.00004f);
+            for(int tri=0;tri<2;tri++) {
+                assertEquals(2,packed.material()[tri*12+7],"glass surface kind");
+                assertEquals(0,Float.floatToRawIntBits(packed.material()[tri*12+9])&32,"binary alpha does not cut a volume");
+                assertEquals((face&1)==0?-1:1,packed.material()[tri*12+axis]);
+            }
+        }
+    }
+
     @Test void allSixFacesWindOutwardAndKeepFractionalDepth() {
         for(int face=0;face<6;face++) {
             float[] p=new float[12],uv=new float[8];
@@ -31,6 +54,17 @@ final class RtVoxyMeshTest {
             float[] a={p[3]-p[0],p[4]-p[1],p[5]-p[2]}, b={p[6]-p[0],p[7]-p[1],p[8]-p[2]};
             float[] n={a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]};
             assertTrue(n[axis]*((face&1)==0?-1:1)>0,"face "+face);
+        }
+    }
+
+    @Test void rebasingRetainsTheSameFractionalGeometryAtBothWorldBorders() {
+        var glass=new VoxySceneData.Model(7,FULL,FULL,FULL,FULL,FULL,FULL,32,-1,null,false,false,true,0);
+        var mesh=source(new long[]{raw(0,7),raw(1,7),raw(4,7),raw(5,7)},glass).textured();
+        float[] expected=null;
+        for(int anchor:new int[]{0,30000000,-30000000}) {
+            var origin=new DistantHorizonsCompat.LodMesh(1,1,anchor,-64,-anchor,32,1,new byte[0],new byte[0],mesh);
+            var p=RtVoxyMesh.pack(List.of(new RtVoxyMesh.Slice(origin,0,mesh.quadCount())),anchor-16,-anchor+16,m->42).positions();
+            if(expected==null)expected=p;else assertArrayEquals(expected,p,"world anchor must not quantize rebased geometry");
         }
     }
 

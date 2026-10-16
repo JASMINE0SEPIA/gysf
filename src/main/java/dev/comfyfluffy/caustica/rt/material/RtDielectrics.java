@@ -23,6 +23,8 @@ public final class RtDielectrics {
 
     /** Soda-lime glass. The default for anything translucent that is not otherwise classified. */
     public static final float GLASS_IOR = 1.52f;
+    /** Keep near and imported glass behind coplanar non-occluding neighbours by the same amount. */
+    public static final float SURFACE_INSET = 2.0e-4f;
     /** Fresh water at room temperature; also the fluid singleton's index. */
     public static final float WATER_IOR = 1.333f;
     /** Ice Ih, slightly below liquid water. */

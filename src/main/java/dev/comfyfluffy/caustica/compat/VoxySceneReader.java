@@ -56,7 +56,7 @@ final class VoxySceneReader {
                 boolean fluid=(v[7]&16)!=0;
                 boolean water=fluid && state.getFluidState().is(FluidTags.WATER);
                 entries[v[0]]=new VoxySceneData.Model(v[0],v[1],v[2],v[3],v[4],v[5],v[6],v[7],v[8],state,
-                        fluid,water,!water && (v[7]&4)!=0,state.getLightEmission());
+                        fluid,water,VoxySceneData.isGlass(v[7],fluid),state.getLightEmission());
             }
             palette=new VoxySceneData.Palette(entries,(int[])colours.invoke(scene));
             previousModels=nextModels; cache.clear();

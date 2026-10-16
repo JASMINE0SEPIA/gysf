@@ -43,6 +43,7 @@ final class RtVoxyMesh {
         for(var slice:slices) {
             var source=slice.mesh;
             var mesh=source.textured();
+            int offsetX=Math.subtractExact(source.originX(),originX),offsetZ=Math.subtractExact(source.originZ(),originZ);
             for(int i=slice.start;i<slice.end;i++) {
                 long raw=mesh.quad(i);
                 int face=(int)raw&7,modelId=(int)(raw>>>26)&65535;
@@ -50,13 +51,18 @@ final class RtVoxyMesh {
                 int data=model.face(face),scale=1<<mesh.level();
                 long precise=mesh.fluidHeights(i);
                 corners(raw,data,model.fluid(),scale,p,uv,precise);
+                if(model.glass()) {
+                    int axis=face<2?1:face<4?2:0;
+                    float inset=((face&1)==0?1:-1)*dev.comfyfluffy.caustica.rt.material.RtDielectrics.SURFACE_INSET;
+                    for(int v=0;v<4;v++)p[v*3+axis]+=inset;
+                }
                 if(model.fluid() && precise!=0) preciseFluids++;
                 int q=model.water()?nextWater++:nextOrdinary++;
                 int vertex=q*4;
                 for(int v=0;v<4;v++) {
-                    positions[q*12+v*3]=p[v*3]+source.originX()-originX;
+                    positions[q*12+v*3]=p[v*3]+offsetX;
                     positions[q*12+v*3+1]=p[v*3+1]+source.originY();
-                    positions[q*12+v*3+2]=p[v*3+2]+source.originZ()-originZ;
+                    positions[q*12+v*3+2]=p[v*3+2]+offsetZ;
                 }
                 int[] order={0,1,2,0,2,3};
                 for(int v=0;v<6;v++) {
@@ -65,7 +71,7 @@ final class RtVoxyMesh {
                 }
                 int tint=(model.flags()&2)!=0 && model.tint()>=0
                         ? mesh.colour(model.tint()+((int)(raw>>>46)&511)) : model.tint();
-                boolean cutout=(data&(1<<22))!=0 || (!model.fluid() && (data&(1<<23))!=0 && ((raw>>>3)&255)!=0);
+                boolean cutout=!model.glass()&&((data&(1<<22))!=0 || (!model.fluid() && (data&(1<<23))!=0 && ((raw>>>3)&255)!=0));
                 int flags=PRIM_VOXY|face|(((data>>>24)&3)<<3)|(cutout?32:0);
                 if(model.state()!=null && model.state().is(net.minecraft.tags.BlockTags.LEAVES)) flags|=64;
                 if((flags&96)==96) leafCutouts++;

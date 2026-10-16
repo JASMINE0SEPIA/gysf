@@ -1,9 +1,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$OutputDir,
-    [string]$ProviderJar='../voxy-vulkan-26.3/build/libs/voxy-vulkan-0.2.20-26.3-vulkan.10-dev-d4097ba.jar',
+    [string]$ProviderJar='../voxy-vulkan-26.3/build/libs/voxy-vulkan-0.2.20-26.3-vulkan.11-dev-15ff198.jar',
     [string]$PythonPath='C:/Python314/python.exe',
-    [switch]$Optics
+    [switch]$Optics,[switch]$Varied
 )
 $ErrorActionPreference='Stop'
 $taskRoot=Split-Path -Parent $PSScriptRoot
@@ -13,6 +13,7 @@ foreach($taskName in 'JAVA_TOOL_OPTIONS','VK_KHRONOS_VALIDATION_VALIDATE_SYNC','
 }
 Push-Location $taskRoot
 try {
+    if($Optics -and $Varied){throw 'Use a separate varied mixed/near comparison'}
     if(-not $env:JAVA_HOME -or -not $env:VULKAN_SDK -or -not $env:DLSS_SDK) {
         throw 'Set JAVA_HOME, VULKAN_SDK and DLSS_SDK before the isolated GPU guide test'
     }
@@ -36,6 +37,7 @@ try {
             '-Dgysf.smoke.cleanWater=true -Dgysf.smoke.waterCompareOnly=true -Dgysf.smoke.waterGuides=true '+
             '-Dgysf.smoke.requirePreciseFluids=true -Dgysf.voxy.validateCoverage=true '
         if($taskMode -eq 'near'){$taskOptions+='-Dgysf.smoke.waterNearReference=true '}
+        if($Varied){$taskOptions+='-Dgysf.smoke.waterVaried=true -Dcaustica.rt.particles=false '}
         if($Optics){$taskOptions+='-Dgysf.rt.captureResolvedGuides=true -Dgysf.smoke.waterOptics=true -Dgysf.smoke.width=427 -Dgysf.smoke.height=240 '}
         $env:JAVA_TOOL_OPTIONS=$taskOptions+'"-Dgysf.smoke.guideDir='+$taskCapture+'"'
         & .\gradlew.bat @taskGradle runSmokeClient -PvooxxySmoke "-PvooxxySmokeJar=$taskProvider" -PvalidateVulkan *> $taskLog
@@ -49,7 +51,7 @@ try {
         & $PythonPath (Join-Path $PSScriptRoot 'Analyze-WaterGuides.py') (Join-Path $taskOutput 'mixed') (Join-Path $taskOutput 'near') --output $taskAnalysis --require-static --require-material *> (Join-Path $taskOutput 'analysis.log')
     }
     if($LASTEXITCODE -ne 0){throw 'GPU guide numerical gate failed; inspect analysis.log and analysis/results.json'}
-    [ordered]@{State='passed';Phases=$taskPhaseCount;Optics=[bool]$Optics;Omm=$false;LiveRr=$true;Jitter=0;WaveSpeed=0;
+    [ordered]@{State='passed';Phases=$taskPhaseCount;Optics=[bool]$Optics;Varied=[bool]$Varied;Omm=$false;LiveRr=$true;Jitter=0;WaveSpeed=0;
         ProviderJar=$taskProvider;ProviderSha256=(Get-FileHash -LiteralPath $taskProvider).Hash;
         SourceHead=(& git rev-parse HEAD);Scope='Isolated game, raw GPU interfaces and guides; no FPS acceptance'
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskOutput 'pass.json') -Encoding utf8

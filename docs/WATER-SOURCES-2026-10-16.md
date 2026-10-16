@@ -1,8 +1,9 @@
 # Actual water sources and coincident mesh edges
 
-Production remains `55f72e7`, provider `d4097ba`. This checkpoint adds smoke/native validation,
-not a production renderer change. The default-off finite-water gate and PCL installation are
-unchanged. The complete cloud build for `55f72e7` passed in
+At this checkpoint production was `55f72e7`, provider `d4097ba`. It added smoke/native validation,
+not a production renderer change. The default-off finite-water gate and PCL installation were
+unchanged. The later material correction is recorded in [GLASS-HANDOFF-2026-10-16.md](GLASS-HANDOFF-2026-10-16.md).
+The complete cloud build for `55f72e7` passed in
 [run 38946565440](https://github.com/JASMINE0SEPIA/gysf/actions/runs/38946565440).
 
 ## Live source capture

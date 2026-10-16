@@ -58,9 +58,10 @@ def load(folder):
 
 def fixture_roi(data, margin=0):
     p = data["position"] + data["camera"]
+    varied = data["meta"]["request"].get("varied", False)
     return ((p[..., 0] > 48 + margin) & (p[..., 0] < 80 - margin)
             & (p[..., 2] > 16 + margin) & (p[..., 2] < 145 - margin)
-            & (p[..., 1] > 111.75) & (p[..., 1] < 114.1))
+            & (p[..., 1] > (109 if varied else 111.75)) & (p[..., 1] < (116.2 if varied else 114.1)))
 
 def single(data):
     water = (data["kind"] == 2) & fixture_roi(data)
@@ -86,9 +87,20 @@ def single(data):
                                       and result["staticPhysicalMotion"]["max"] < 1e-7
                                       and result["interfaceNormalLengthError"]["max"] < 1e-6
                                       and result["specularMotionPixels"]["max"] < .001)
+    if data["meta"]["request"].get("varied", False):
+        assert data["meta"]["request"]["particles"] is False and not (data["kind"] == 3).any(), "Particles contaminate the fixed geometry comparison"
+        p = data["position"] + data["camera"]
+        step = water & (np.abs(p[..., 2]-80) < .001) & (np.abs(data["normal"][..., 1]) < 1e-6)
+        solid = ((data["kind"] == 1) & (p[..., 0] >= 54) & (p[..., 0] <= 60)
+                 & (p[..., 2] >= 60) & (p[..., 2] <= 68) & (p[..., 1] >= 112) & (p[..., 1] <= 113.001))
+        glass = (data["kind"] == 4) & fixture_roi(data)  # MATERIAL_DIELECTRIC (3) + 1
+        result["variedCoverage"] = {"stepSidePixels": int(step.sum()), "solidCoverPixels": int(solid.sum()),
+                                    "glassCoverPixels": int(glass.sum()), "lowerSurfacePixels": int((water & (p[..., 2] < 79)).sum()),
+                                    "upperSurfacePixels": int((water & (p[..., 2] > 81)).sum())}
     return result
 
 def compare(mixed, reference, output, phase):
+    assert mixed["meta"]["request"].get("varied", False) == reference["meta"]["request"].get("varied", False), "Fixture modes differ"
     assert mixed["position"].shape == reference["position"].shape, "Render extents differ"
     assert np.max(np.abs(mixed["camera"] - reference["camera"])) < 1e-6, "Cameras differ"
     ray_error = np.linalg.norm(mixed["rays"] - reference["rays"], axis=-1)
@@ -123,6 +135,14 @@ def compare(mixed, reference, output, phase):
         and all(row["positionBlocks"]["count"] > 100 and row["positionBlocks"]["max"] < .002
                 and row["normalVector"]["max"] < .002 for row in result["byOwner"].values())
         and result["guides"]["view-z"]["max"] < .002)
+    if reference["meta"]["request"].get("varied", False):
+        foreground = (reference["kind"] > 0) & fixture_roi(reference, 1)
+        matched = foreground & (mixed["kind"] == reference["kind"])
+        nonwater = matched & (reference["kind"] != 2)
+        result["variedForeground"] = {"pixels": int(foreground.sum()), "materialMismatchPixels": int((foreground & ~matched).sum()),
+                                       "nonWaterPositionBlocks": stats(pos_error[nonwater]), "nonWaterNormalVector": stats(normal_error[nonwater])}
+        result["variedForegroundGate"] = bool((foreground & ~matched).sum() == 0 and
+            (not nonwater.any() or (pos_error[nonwater].max() < .002 and normal_error[nonwater].max() < .002)))
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -158,6 +178,14 @@ def main():
         results["phases"][phase] = row
     (args.output / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(json.dumps(results, indent=2))
+    varied = [row for row in results["phases"].values() if "variedCoverage" in row["mixed"]]
+    if varied:
+        for owner in ("mixed", "reference") if args.reference else ("mixed",):
+            for key in ("stepSidePixels", "solidCoverPixels", "glassCoverPixels", "lowerSurfacePixels", "upperSurfacePixels"):
+                if sum(row[owner]["variedCoverage"][key] for row in varied) <= 20:
+                    raise SystemExit(f"Varied source not exercised in raw RT interfaces: {owner} {key}")
+        if args.reference and not all(row["comparison"]["variedForegroundGate"] for row in varied):
+            raise SystemExit("Varied foreground material/geometry mismatch")
     if args.require_static and not all(row[owner]["staticHistoryGate"] for row in results["phases"].values()
                                       for owner in ("mixed", "reference") if owner in row):
         raise SystemExit("Static-water history gate failed; inspect raw normal/physical/reflection motion")

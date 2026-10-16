@@ -441,7 +441,7 @@ final class RtTerrainMesher {
         // own plane (base stays, overlay moves in front so its cutout reveals the base; cross back-face
         // separates from the front). Pooled — reset each block, never reallocated steady-state.
         private static final float OFFSET = 2.0e-4f;         // outward nudge (blocks) to break coplanar depth ties
-        private static final float TRANSLUCENT_INSET = 2.0e-4f; // inward recess (blocks) for glass/ice vs coplanar neighbours
+        private static final float TRANSLUCENT_INSET = dev.comfyfluffy.caustica.rt.material.RtDielectrics.SURFACE_INSET;
         private static final float COINCIDENT_EPS = 1.0e-4f; // verts this close are "the same" point
         private static final int RESOLVE_CAP = 128;          // skip the O(n^2) resolve for pathological blocks
         private final List<PendingQuad> pending = new ArrayList<>(8);

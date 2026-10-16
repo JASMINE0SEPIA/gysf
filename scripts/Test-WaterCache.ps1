@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param([switch]$Pressure,[string]$Label=('water-cache-'+(Get-Date -Format 'yyyyMMdd-HHmmss')),
-    [string]$ProviderJar='../voxy-vulkan-26.3/build/libs/voxy-vulkan-0.2.20-26.3-vulkan.10-dev-d4097ba.jar')
+    [string]$ProviderJar='../voxy-vulkan-26.3/build/libs/voxy-vulkan-0.2.20-26.3-vulkan.11-dev-15ff198.jar')
 $ErrorActionPreference='Stop'
 if($Label -notmatch '^[A-Za-z0-9_-]+$'){throw 'Use a fresh simple label'}
 if(!$env:VULKAN_SDK -or !$env:DLSS_SDK){throw 'Set VULKAN_SDK and DLSS_SDK'}
