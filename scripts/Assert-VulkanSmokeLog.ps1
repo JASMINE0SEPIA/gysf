@@ -1,5 +1,6 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync,[switch]$RequireWaterField,[switch]$RequireWaterGuides)
+param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync,[switch]$RequireWaterField,[switch]$RequireWaterGuides,
+      [ValidateRange(1,64)][int]$GuideCaptureCount=4)
 $ErrorActionPreference='Stop'
 $content=Get-Content -LiteralPath $Path -Raw
 $validation='VUID-[A-Za-z0-9_-]+|SYNC-HAZARD|\b(?:WRITE|READ)[_-]AFTER[_-](?:WRITE|READ)\b|hazard detected|Validation Error'
@@ -22,9 +23,9 @@ if($RequireNgxClearSync -and ($content -notmatch 'Vulkan clear synchronized: cal
 }
 $guideShutdowns=[regex]::Matches($content,'Guide readback shutdown: live=(\d+) bytes, peak=\d+ bytes, captures=(\d+)')
 if($guideShutdowns | Where-Object {[long]$_.Groups[1].Value -ne 0}) {throw "Nonzero guide readback shutdown in $Path"}
-if($RequireWaterGuides -and ($guideShutdowns.Count -ne 1 -or [long]$guideShutdowns[0].Groups[2].Value -ne 4 -or
-        $content -notmatch 'GYSF_WATER_GUIDES: PASS phases=4 locked=true jitter=0 staticWaves=true' -or
-        [regex]::Matches($content,'GYSF_GUIDE_CAPTURE: saved=').Count -ne 4)) {
-    throw "Missing four-phase GPU guide readback/shutdown qualification in $Path"
+if($RequireWaterGuides -and ($guideShutdowns.Count -ne 1 -or [long]$guideShutdowns[0].Groups[2].Value -ne $GuideCaptureCount -or
+        $content -notmatch "GYSF_WATER_GUIDES: PASS phases=$GuideCaptureCount locked=true jitter=0 staticWaves=true" -or
+        [regex]::Matches($content,'GYSF_GUIDE_CAPTURE: saved=').Count -ne $GuideCaptureCount)) {
+    throw "Missing $GuideCaptureCount-phase GPU guide readback/shutdown qualification in $Path"
 }
 Write-Output "Vulkan smoke log accepted: $Path"

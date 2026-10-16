@@ -14,6 +14,7 @@ third_party/
 bin/
 *.log
 *.class
+__pycache__/
 
 # Vendor upscaler runtimes are never committed. CI stages them from the official SDKs
 # (NVIDIA/DLSS, AMD FidelityFX, Intel XeSS) into build/native/*/release before bundling.

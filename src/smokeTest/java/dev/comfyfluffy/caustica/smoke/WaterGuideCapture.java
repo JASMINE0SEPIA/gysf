@@ -16,30 +16,38 @@ import java.util.concurrent.CompletableFuture;
 /** Fixed-eye, static-field numerical comparison. Snapshot I/O is not a performance measurement. */
 public final class WaterGuideCapture {
     public static final boolean ENABLED=Boolean.getBoolean("gysf.smoke.waterGuides");
-    public static final int END_TICK=2450;
-    private static final String[] NAMES={"above-1","above-4","under-1","under-4"};
+    public static final boolean OPTICS=Boolean.getBoolean("gysf.smoke.waterOptics");
+    public static final int END_TICK=OPTICS?3500:2450;
+    private static final String[] NAMES=OPTICS?new String[]{"under-raw4-1","under-raw8-1","under-rr4-1","under-rr8-1",
+            "under-raw4-4","under-raw8-4","under-rr4-4","under-rr8-4"}:new String[]{"above-1","above-4","under-1","under-4"};
     private static int phase=-1;
     private int phaseStart,completed;
     private long quietSince,sceneToken=Long.MIN_VALUE;
+    private long phaseFrame,requestFrame;
     private CompletableFuture<Path> capture;
     private final List<CompletableFuture<?>> screenshots=new ArrayList<>();
-    public static boolean locked(){return ENABLED&&phase>=0&&phase<4&&Minecraft.getInstance().player!=null;}
-    private static double eyeY(){return phase<2?141.62:110.25;}
+    public static boolean locked(){return ENABLED&&phase>=0&&phase<NAMES.length&&Minecraft.getInstance().player!=null;}
+    private static boolean above(){return !OPTICS&&phase<2;}
+    private static double eyeY(){return OPTICS?111.62:above()?141.62:110.25;}
+    private static int pitch(){return above()?16:-2;}
     public static void enforceCamera() {
         if(!locked())return;
         var client=Minecraft.getInstance();
         if(client.gui.screen()!=null)client.gui.setScreen(null);
         net.minecraft.client.KeyMapping.releaseAll();
-        client.player.setPos(64.5,eyeY()-client.player.getEyeHeight(),.5+(phase>=2?32:0));
+        client.player.setPos(64.5,eyeY()-client.player.getEyeHeight(),above()?.5:32.5);
         client.player.setDeltaMovement(Vec3.ZERO);
-        client.player.setYRot(0);client.player.setXRot(phase<2?16:-2);
-        client.player.yRotO=0;client.player.xRotO=phase<2?16:-2;
+        client.player.setYRot(0);client.player.setXRot(pitch());
+        client.player.yRotO=0;client.player.xRotO=pitch();
     }
     void sample(Minecraft client,int tick) {
         if(!ENABLED)return;
         if(tick==600)begin(client,tick,0);
         if(!locked())return;
         enforceCamera();
+        // Only the recorded raw reference frame needs 32 spp. Keep scene publication and the
+        // asynchronous readback wait at 1 spp; never reset it until a render has consumed the request.
+        if(OPTICS&&capture!=null&&RtComposite.frameCounter()>requestFrame)CausticaConfig.Rt.Composite.SPP.set(1);
         if(capture!=null&&capture.isDone()) {
             Path directory=capture.join();
             var screenshot=new CompletableFuture<Void>();screenshots.add(screenshot);
@@ -48,10 +56,10 @@ public final class WaterGuideCapture {
                 catch(Exception e){screenshot.completeExceptionally(e);}finally{image.close();}
             });
             completed++;capture=null;
-            if(completed==4){phase=4;System.out.println("GYSF_WATER_GUIDES: captures complete");return;}
+            if(completed==NAMES.length){phase=NAMES.length;System.out.println("GYSF_WATER_GUIDES: captures complete");return;}
             begin(client,tick,phase+1);
         }
-        if(tick<930||tick-phaseStart<100||capture!=null)return;
+        if(tick<930||tick-phaseStart<100||RtComposite.frameCounter()-phaseFrame<64||capture!=null)return;
         boolean reference=Boolean.getBoolean("gysf.smoke.waterNearReference");
         boolean near=RtTerrain.isSectionReady(new BlockPos(64,110,32));
         boolean far=RtTerrain.isSectionReady(new BlockPos(64,110,128));
@@ -64,32 +72,48 @@ public final class WaterGuideCapture {
         if(token!=sceneToken||quietSince==0){sceneToken=token;quietSince=now;return;}
         if(now-quietSince<2_000_000_000L)return;
         if(client.gui.screen()!=null||Math.abs(client.player.getEyeY()-eyeY())>1e-6
-                ||client.player.getYRot()!=0||client.player.getXRot()!=(phase<2?16:-2))
+                ||client.player.getYRot()!=0||client.player.getXRot()!=pitch())
             throw new IllegalStateException("Guide camera is not locked");
         Path root=Path.of(Objects.requireNonNull(System.getProperty("gysf.smoke.guideDir"),"Missing guideDir"));
-        capture=RtGuideCapture.INSTANCE.request(root.resolve(NAMES[phase]),Map.of("phase",NAMES[phase],
-                "nearReference",reference,"nearReady",near,"farReady",far,"expectedEye",List.of(64.5,eyeY(),phase<2?.5:32.5),
-                "expectedRotation",List.of(0,phase<2?16:-2),"renderDistance",client.options.renderDistance().get()));
+        var context=new LinkedHashMap<String,Object>();
+        context.put("phase",NAMES[phase]);context.put("nearReference",reference);context.put("nearReady",near);context.put("farReady",far);
+        context.put("expectedEye",List.of(64.5,eyeY(),above()?.5:32.5));context.put("expectedRotation",List.of(0,pitch()));
+        context.put("renderDistance",client.options.renderDistance().get());context.put("optics",OPTICS);
+        if(OPTICS)CausticaConfig.Rt.Composite.SPP.set((phase&3)<2?32:1);
+        context.put("spp",CausticaConfig.Rt.Composite.SPP.value());context.put("bounces",CausticaConfig.Rt.Composite.MAX_BOUNCES.value());
+        context.put("rr",CausticaConfig.Rt.DlssRr.ENABLED.value());
+        requestFrame=RtComposite.frameCounter();
+        capture=RtGuideCapture.INSTANCE.request(root.resolve(NAMES[phase]),context);
         System.out.println("GYSF_WATER_GUIDES: requested="+NAMES[phase]+" reference="+reference);
     }
     private void begin(Minecraft client,int tick,int nextPhase) {
         phase=nextPhase;phaseStart=tick;quietSince=0;sceneToken=Long.MIN_VALUE;
+        phaseFrame=RtComposite.frameCounter();
         CausticaConfig.Rt.Composite.WATER_WAVES.set(true);
-        CausticaConfig.Rt.Composite.WATER_WAVE_STRENGTH.set((phase&1)==0?1f:4f);
+        CausticaConfig.Rt.Composite.WATER_WAVE_STRENGTH.set(OPTICS?(phase<4?1f:4f):(phase&1)==0?1f:4f);
         CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(0f);
+        if(OPTICS) {
+            boolean rr=(phase&3)>=2;
+            CausticaConfig.Rt.DlssRr.ENABLED.set(rr);CausticaConfig.Rt.DlssRr.QUALITY.set(5);
+            CausticaConfig.Rt.Composite.DENOISER.set(rr);CausticaConfig.Rt.Nrd.ENABLED.set(false);
+            CausticaConfig.Rt.Denoise.ENABLED.set(false);
+            CausticaConfig.Rt.Fsr.ENABLED.set(false);CausticaConfig.Rt.Xess.ENABLED.set(false);CausticaConfig.Rt.Fg.ENABLED.set(false);
+            CausticaConfig.Rt.Composite.SPP.set(1);CausticaConfig.Rt.Composite.MAX_BOUNCES.set((phase&1)==0?4:8);
+            client.options.fov().set(70);
+        }
         client.options.bobView().set(false);
         enforceCamera();
         client.player.connection.sendCommand(String.format(Locale.ROOT,"execute in minecraft:overworld run tp @s %.9f %.9f %.9f 0 %d",
-                client.player.getX(),client.player.getY(),client.player.getZ(),phase<2?16:-2));
+                client.player.getX(),client.player.getY(),client.player.getZ(),pitch()));
         System.out.println("GYSF_WATER_GUIDES: phase="+NAMES[phase]+" eye="+client.player.getEyePosition());
     }
     void verify() {
         if(!ENABLED)return;
-        if(completed!=4||capture!=null)throw new IllegalStateException("Guide phases incomplete: "+completed);
+        if(completed!=NAMES.length||capture!=null)throw new IllegalStateException("Guide phases incomplete: "+completed);
         for(var screenshot:screenshots) {
             if(!screenshot.isDone())throw new IllegalStateException("Guide display snapshot did not complete before the deadline");
             screenshot.join();
         }
-        System.out.println("GYSF_WATER_GUIDES: PASS phases=4 locked=true jitter=0 staticWaves=true");
+        System.out.println("GYSF_WATER_GUIDES: PASS phases="+NAMES.length+" locked=true jitter=0 staticWaves=true");
     }
 }

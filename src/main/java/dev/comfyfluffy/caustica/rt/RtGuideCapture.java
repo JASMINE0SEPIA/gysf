@@ -19,6 +19,7 @@ import static org.lwjgl.vulkan.KHRSynchronization2.vkCmdPipelineBarrier2KHR;
 public final class RtGuideCapture {
     public static final RtGuideCapture INSTANCE=new RtGuideCapture();
     private static final boolean ENABLED=Boolean.getBoolean("gysf.rt.captureGuides");
+    private static final boolean RESOLVED=Boolean.getBoolean("gysf.rt.captureResolvedGuides");
     private static final long MAX_PIXELS=2_097_152;
     public static boolean enabled(){return ENABLED;}
     public record Image(String name,String format,int bytes,RtImage image) {}
@@ -31,9 +32,10 @@ public final class RtGuideCapture {
         final Request request;final int width,height;final long frame;
         final RtGpuExecutor.TrackedGraphicsUse use=new RtGpuExecutor.TrackedGraphicsUse();
         final RtBuffer surface;
-        RtBuffer copies;List<Region> regions;Map<String,Object> metadata;
+        RtBuffer copies,resolved;int resolvedWidth,resolvedHeight;
+        List<Region> regions;Map<String,Object> metadata;
         byte[] currentField,previousField;
-        boolean recorded,submitted;int age;
+        boolean recorded,submitted;String resolvedFilter;int age;
         Flight(Request r,int w,int h,long f,RtBuffer s){request=r;width=w;height=h;frame=f;surface=s;}
     }
 
@@ -109,6 +111,30 @@ public final class RtGuideCapture {
     public void submitted(RtGpuExecutor.GraphicsUse use) {
         if(flight!=null&&flight.recorded&&!flight.submitted){flight.use.mark(use);flight.submitted=true;}
     }
+    /** Exact same-frame display-resolution HDR after reconstruction, before exposure/tonemapping. */
+    public void recordResolved(RtContext ctx,VkCommandBuffer cmd,MemoryStack stack,RtImage image,String filter) {
+        if(!RESOLVED)return;
+        Flight f=flight;
+        if(f==null||!f.recorded||f.submitted||f.resolved!=null)throw new IllegalStateException("Resolved capture is out of order");
+        long pixels=Math.multiplyExact((long)image.width,image.height);
+        if(pixels>MAX_PIXELS)throw new IllegalArgumentException("Resolved readback exceeds pixel budget");
+        f.resolved=ctx.createBuffer(pixels*8,VK_BUFFER_USAGE_TRANSFER_DST_BIT,true,"captured resolved radiance");
+        f.resolvedWidth=image.width;f.resolvedHeight=image.height;
+        f.resolvedFilter=filter;
+        liveBytes+=f.resolved.size;peakBytes=Math.max(peakBytes,liveBytes);
+        imageBarrier(cmd,stack,image,VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,VK_ACCESS_2_MEMORY_WRITE_BIT|VK_ACCESS_2_MEMORY_READ_BIT,
+                VK_PIPELINE_STAGE_2_TRANSFER_BIT,VK_ACCESS_2_TRANSFER_READ_BIT);
+        VkBufferImageCopy.Buffer copy=VkBufferImageCopy.calloc(1,stack);
+        copy.get(0).imageSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1);
+        copy.get(0).imageExtent().set(image.width,image.height,1);
+        vkCmdCopyImageToBuffer(cmd,image.image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,f.resolved.handle,copy);
+        imageBarrier(cmd,stack,image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_GENERAL,
+                VK_PIPELINE_STAGE_2_TRANSFER_BIT,VK_ACCESS_2_TRANSFER_READ_BIT,
+                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,VK_ACCESS_2_MEMORY_WRITE_BIT|VK_ACCESS_2_MEMORY_READ_BIT);
+        memoryBarrier(cmd,stack,VK_PIPELINE_STAGE_2_TRANSFER_BIT,VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_HOST_BIT,VK_ACCESS_2_HOST_READ_BIT);
+    }
     private void finish() {
         Flight f=flight;
         try {
@@ -120,6 +146,12 @@ public final class RtGuideCapture {
                 String name=r.name+".bin";write(f.request.directory.resolve(name),f.copies.mapped+r.offset,r.bytes);
                 files.put(r.name,Map.of("file",name,"format",r.format,"bytes",r.bytes));
             }
+            if(f.resolved!=null) {
+                f.resolved.invalidate(0,f.resolved.size);
+                write(f.request.directory.resolve("resolved.bin"),f.resolved.mapped,f.resolved.size);
+                files.put("resolved",Map.of("file","resolved.bin","format","rgba16f-resolved","bytes",f.resolved.size,
+                        "width",f.resolvedWidth,"height",f.resolvedHeight));
+            }
             Files.write(f.request.directory.resolve("field-current.bin"),f.currentField);
             Files.write(f.request.directory.resolve("field-previous.bin"),f.previousField);
             var result=new LinkedHashMap<String,Object>();result.put("version",1);result.put("width",f.width);result.put("height",f.height);
@@ -127,6 +159,10 @@ public final class RtGuideCapture {
             result.put("surfaceLanes",List.of("camRelativePosition.xyz, payloadFlags","normal.xyz, roughness",
                     "previousNormal.xyz, materialPlusOne (0=miss)","currentMinusPreviousDisplacement.xyz, distance"));
             result.put("files",files);result.put("frameState",f.metadata);result.put("request",f.request.context);
+            if(f.resolved!=null) {
+                result.put("resolvedByRr","dlss-rr".equals(f.resolvedFilter));
+                result.put("resolvedFilter",f.resolvedFilter);
+            }
             var offsets=new TreeMap<String,Integer>();
             for(var field:WorldPushData.class.getFields())if(field.getName().endsWith("_OFFSET"))
                 offsets.put(field.getName(),field.getInt(null));
@@ -145,6 +181,7 @@ public final class RtGuideCapture {
     private void release(Flight f) {
         liveBytes-=f.surface.size;f.surface.destroy();
         if(f.copies!=null){liveBytes-=f.copies.size;f.copies.destroy();}
+        if(f.resolved!=null){liveBytes-=f.resolved.size;f.resolved.destroy();}
     }
     private static long align(long value){return (value+15)&~15L;}
     private static void memoryBarrier(VkCommandBuffer cmd,MemoryStack stack,long srcStage,long srcAccess,long dstStage,long dstAccess) {

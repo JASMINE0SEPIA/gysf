@@ -390,6 +390,14 @@ Low path caps can still truncate legitimate multi-interface paths, and distant
 water-volume attenuation remains visible. The origin fix addresses false
 self-intersections without changing the bounce budget.
 
+2026-10-16 audit: the historical controls labelled `raw-two`/`raw-eight` only
+disabled `Composite.DENOISER` (the RR-facing switch). SVGF has an independent
+`Denoise.ENABLED` setting; those captures did not prove it was disabled. Their
+dark-pixel counts remain observations of the saved images, but must not be
+treated as measurements of an unfiltered trace. The later optics diagnostic
+explicitly disables all other filters, records the actual filter and the
+same-frame pre/post HDR images, and rejects a raw control unless they match.
+
 ## Shared near/far water path: 0.4.0
 
 API 5 water now selects `MATERIAL_WATER` for entering as well as exiting hits,

@@ -6,6 +6,8 @@ New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 $clean="Synthetic checker fixture`nGYSF_SMOKE: PASS`nRT LOD native shutdown: live=0 bytes"
 $guides="$clean`nGYSF_WATER_GUIDES: PASS phases=4 locked=true jitter=0 staticWaves=true"+
     ("`nGYSF_GUIDE_CAPTURE: saved=x"*4)+"`nGuide readback shutdown: live=0 bytes, peak=64 bytes, captures=4"
+$optics="$clean`nGYSF_WATER_GUIDES: PASS phases=8 locked=true jitter=0 staticWaves=true"+
+    ("`nGYSF_GUIDE_CAPTURE: saved=x"*8)+"`nGuide readback shutdown: live=0 bytes, peak=64 bytes, captures=8"
 $cases=@(
     @{Name='clean';Text=$clean;Reject=$false},
     @{Name='ngx-clear-no-vuid';Text="$clean`nvkCmdClearColorImage(): WRITE_AFTER_WRITE hazard detected. nv.ngx.dlssd.resource";Reject=$true},
@@ -18,13 +20,16 @@ $cases=@(
     @{Name='guide-leak';Text="$clean`nGuide readback shutdown: live=64 bytes, peak=64 bytes, captures=4";Reject=$true},
     @{Name='guides-required';Text=$clean;Reject=$true;Guides=$true},
     @{Name='guides-incomplete';Text="$clean`nGuide readback shutdown: live=0 bytes, peak=64 bytes, captures=3";Reject=$true;Guides=$true},
-    @{Name='guides-qualified';Text=$guides;Reject=$false;Guides=$true}
+    @{Name='guides-qualified';Text=$guides;Reject=$false;Guides=$true},
+    @{Name='optics-wrong-count';Text=$optics;Reject=$true;Guides=$true},
+    @{Name='optics-qualified';Text=$optics;Reject=$false;Guides=$true;GuideCount=8}
 )
 foreach($case in $cases) {
     $casePath=Join-Path $testRoot ($case.Name+'.log')
     Set-Content -LiteralPath $casePath -Value $case.Text -Encoding utf8
     $rejected=$false
-    try { & (Join-Path $PSScriptRoot 'Assert-VulkanSmokeLog.ps1') -Path $casePath -RequireWaterField:([bool]$case.Field) -RequireWaterGuides:([bool]$case.Guides) | Out-Null }
+    $taskGuideCount=if($case.GuideCount){$case.GuideCount}else{4}
+    try { & (Join-Path $PSScriptRoot 'Assert-VulkanSmokeLog.ps1') -Path $casePath -RequireWaterField:([bool]$case.Field) -RequireWaterGuides:([bool]$case.Guides) -GuideCaptureCount $taskGuideCount | Out-Null }
     catch {$rejected=$true}
     if($rejected -ne $case.Reject) {throw "Smoke log checker regression: $($case.Name)"}
 }

@@ -64,6 +64,8 @@ public final class GysfSmokeClient implements ClientModInitializer {
         if(WaterGuideCapture.ENABLED&&(!CLEAN_WATER||!WATER_COMPARE||FLUID_MIP||FLUID_TOPOLOGY||WATER_MATRIX
                 ||WaterCameraCapture.ENABLED||WaterSequenceCapture.ENABLED||!dev.comfyfluffy.caustica.rt.RtGuideCapture.enabled()))
             throw new IllegalStateException("Water guides require a separate clean comparison and raw readback enabled");
+        if(WaterGuideCapture.OPTICS&&(!WaterGuideCapture.ENABLED||!Boolean.getBoolean("gysf.rt.captureResolvedGuides")))
+            throw new IllegalStateException("Water optics requires guide capture and resolved HDR readback");
         if(WaterDomainSmokeProbe.ENABLED && !FLUID_MIP)
             throw new IllegalStateException("Water domain probe needs the isolated fluid-mip pool");
         if(FLUID_MIP && (!CLEAN_WATER || !WATER_COMPARE || FLUID_TOPOLOGY || FLUID_TOPOLOGY_EDITS

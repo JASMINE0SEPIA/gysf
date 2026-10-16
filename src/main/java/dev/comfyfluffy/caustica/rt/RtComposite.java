@@ -2143,6 +2143,8 @@ public final class RtComposite {
                 }
             }
             VulkanCommandEncoder.memoryBarrier(cmd, stack); // rrOutput visible to exposure histogram
+            if(guideCaptureAddress!=0)RtGuideCapture.INSTANCE.recordResolved(ctx,cmd,stack,rrOutput,
+                    rrPath&&rrDone?"dlss-rr":nrdDone?"nrd":svgfRan?"svgf":"none");
 
             // Auto-exposure meters rrOutput (the post-RR, denoised/converged image), not the raw
             // pre-RR trace: RR has no notion of exposure (DLSS-RR Integration Guide §3.7 — ignore
