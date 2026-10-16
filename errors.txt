@@ -1,0 +1,6 @@
+46:error: line 6: Invalid capability operand: 5388
+48:> Task :compileShaders FAILED
+53:FAILURE: Build failed with an exception.
+58:* What went wrong:
+59:Execution failed for task ':compileShaders' (registered in build file 'build.gradle').
+68:BUILD FAILED in 52s

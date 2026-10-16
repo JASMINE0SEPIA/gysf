@@ -1,0 +1,69 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.7.0/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :buildSrc:compileJava NO-SOURCE
+> Task :buildSrc:compileGroovy FROM-CACHE
+> Task :buildSrc:processResources NO-SOURCE
+> Task :buildSrc:classes UP-TO-DATE
+> Task :buildSrc:jar
+
+> Configure project :
+Fabric Loom: 1.18.2
+
+> Task :generateShaderRecords
+
+> Task :compileJava
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+
+> Task :bundleFsrNatives
+> Task :bundleNgxNatives
+> Task :bundleNrdNatives
+> Task :bundleXessNatives
+
+> Task :compileShaders
+/home/runner/work/gysf/gysf/shaders/display/display.comp
+/home/runner/work/gysf/gysf/shaders/display/exposure_hist.comp
+/home/runner/work/gysf/gysf/shaders/display/exposure_resolve.comp
+/home/runner/work/gysf/gysf/shaders/display/fg_sky_mask.comp
+/home/runner/work/gysf/gysf/shaders/display/fg_sky_mask.comp
+/home/runner/work/gysf/gysf/shaders/display/fg_ui_composite.comp
+/home/runner/work/gysf/gysf/shaders/display/hdr_ui_composite.comp
+/home/runner/work/gysf/gysf/shaders/display/native_fg_interp.comp
+/home/runner/work/gysf/gysf/shaders/display/native_fg_interp.comp
+/home/runner/work/gysf/gysf/shaders/display/nrd_combine.comp
+/home/runner/work/gysf/gysf/shaders/display/sdr_present.comp
+/home/runner/work/gysf/gysf/shaders/display/svgf_atrous.comp
+/home/runner/work/gysf/gysf/shaders/display/svgf_reproject.comp
+/home/runner/work/gysf/gysf/shaders/overlay/block_outline.frag
+/home/runner/work/gysf/gysf/shaders/overlay/block_outline.vert
+/home/runner/work/gysf/gysf/shaders/overlay/entity_glow.frag
+/home/runner/work/gysf/gysf/shaders/overlay/entity_glow.vert
+/home/runner/work/gysf/gysf/shaders/overlay/entity_glow_composite.frag
+/home/runner/work/gysf/gysf/shaders/overlay/name_tag.frag
+/home/runner/work/gysf/gysf/shaders/overlay/name_tag.vert
+/home/runner/work/gysf/gysf/shaders/overlay/overlay_fullscreen_triangle.vert
+/home/runner/work/gysf/gysf/shaders/overlay/overlay_passthrough_composite.frag
+error: line 6: Invalid capability operand: 5388
+
+> Task :compileShaders FAILED
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1792119146082.json
+
+[Incubating] Problems report is available at: file:///home/runner/work/gysf/gysf/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* Where:
+Build file '/home/runner/work/gysf/gysf/build.gradle' line: 158
+
+* What went wrong:
+Execution failed for task ':compileShaders' (registered in build file 'build.gradle').
+> Process 'command 'spirv-val'' finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 52s
+9 actionable tasks: 8 executed, 1 from cache
