@@ -78,6 +78,12 @@ for phase, rows in sorted(groups.items()):
             if len(shaders) != 1:
                 raise SystemExit("INVALID: shader changed inside measured phase")
             item[column] = next(iter(shaders))
+    for column in ("waterBoundsVariant", "waterBoundsSource", "waterBoundsChildren", "waterWaveStrength", "waterWaveSpeed", "waterWaveCount"):
+        if column in rows[0]:
+            values = {r[column] for r in rows}
+            if len(values) != 1:
+                raise SystemExit("INVALID: water bounds or wave settings changed inside measured phase")
+            item[column] = next(iter(values))
     if item["renderEvidence"]:
         for key in render_keys:
             if len({r[key] for r in rows}) != 1:
@@ -183,6 +189,28 @@ if metadata and metadata.get("waterShaderBaseline"):
         if len(hit_candidates) > 1:
             raise SystemExit("INVALID: hit-stage candidate shader changed between phases")
         report["shaderComparison"]["hitStage"] = {"baseline": hit_baseline, "candidates": sorted(hit_candidates)}
+if metadata and metadata.get("compareWaterBounds"):
+    sequence = [int(v) for v in metadata["waterBoundsSequence"].split(",")]
+    if len(sequence) == 1:
+        sequence *= len(report["phases"])
+    if len(sequence) != len(report["phases"]) or any(v not in (0, 1) for v in sequence):
+        raise SystemExit("INVALID: water bounds comparison sequence")
+    for item, variant in zip(report["phases"], sequence):
+        if str(variant) != item.get("waterBoundsVariant"):
+            raise SystemExit("INVALID: actual water bounds variant does not match requested order")
+        source = item.get("waterBoundsSource", "")
+        if len(source) != 64 or any(c not in "0123456789abcdef" for c in source):
+            raise SystemExit("INVALID: missing immutable water bounds source identity")
+        if float(item.get("waterWaveStrength", -1)) != 1 or float(item.get("waterWaveSpeed", -1)) != 0 or int(item.get("waterWaveCount", -1)) != 7:
+            raise SystemExit("INVALID: bounds comparison requires frozen strength-1 seven-component waves")
+    fixed = ("preset", "quality", "renderWidth", "renderHeight", "displayWidth", "displayHeight", "filter", "spp", "bounces",
+             "finiteWater", "omm", "waterBoundsSource", "waterBoundsChildren", "waterShader", "waterHitShader")
+    if any(any(k not in item for item in report["phases"]) or len({item[k] for item in report["phases"]}) != 1 for k in fixed):
+        raise SystemExit("INVALID: bounds comparison changed physical inputs or recorded render settings")
+    children = int(report["phases"][0]["waterBoundsChildren"])
+    if children <= 0:
+        raise SystemExit("INVALID: no matched water children")
+    report["boundsComparison"] = {"sequence": sequence, "source": source, "children": children, "orderValidated": True, "settingsMatched": True}
 report["selectedGeometryStable"] = bool(included) and all(item["geometryStable"] for item in included) and all(
     len({tuple(item[k]) for item in included}) == 1 for k in ("nearInstances", "lodSections")) and len({item["nearRadius"] for item in included})==1
 report["selectedSceneVersionsStable"] = bool(included) and all(item.get("versionsStable", False) for item in included)

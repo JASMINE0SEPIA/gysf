@@ -10,6 +10,8 @@ param(
     [ValidatePattern('^[0-5](?:,[0-5])*$')][string]$Qualities='0',
     [switch]$NearMemoryPressure,[switch]$PressureOnly,[switch]$ValidateVulkan,[switch]$EnableOmm,[switch]$MemoryDiagnostic,
     [switch]$FiniteWater,[switch]$GpuTimings,[switch]$CpuStats,
+    [switch]$CompareWaterBounds,
+    [ValidatePattern('^[01](?:,[01])*$')][string]$WaterBoundsSequence='0,1,1,0',
     [string]$WaterShaderBaseline='',
     [string]$WaterHitShaderBaseline='',
     [ValidatePattern('^[01](?:,[01])*$')][string]$WaterShaderSequence='0',
@@ -36,6 +38,12 @@ try {
         "-Dgysf.smoke.perfQualities=$Qualities","-Dgysf.rt.finiteWater=$($FiniteWater.ToString().ToLowerInvariant())")
     if($GpuTimings){$taskFlags+='"-Dgysf.rt.gpuTimings='+[IO.Path]::GetFullPath("run-smoke/performance-smoke/$Label/gpu.csv")+'"'}
     if($CpuStats){$taskFlags+='-Dgysf.smoke.perfCpuStats=true'}
+    if($CompareWaterBounds) {
+        if(!$FiniteWater -or $WaterShaderBaseline){throw 'Bounds comparison requires finite water and cannot combine with shader comparison'}
+        if($WaterBoundsSequence.Split(',').Count -ne 1 -and $WaterBoundsSequence.Split(',').Count -ne $Presets.Split(',').Count){throw 'Bounds sequence count must be one or match presets'}
+        $taskFlags+='-Dgysf.smoke.compareWaterBounds=true'
+        $taskFlags+="-Dgysf.smoke.waterBoundsSequence=$WaterBoundsSequence"
+    }
     if($WaterHitShaderBaseline -and !$WaterShaderBaseline){throw 'Hit-stage comparison requires -WaterShaderBaseline'}
     if($WaterShaderBaseline) {
         if(!$FiniteWater){throw 'Shader comparison requires -FiniteWater'}
@@ -65,6 +73,7 @@ try {
     }
     [ordered]@{validation=[bool]$ValidateVulkan;gpuTimings=[bool]$GpuTimings;cpuStats=[bool]$CpuStats;
         finiteWater=[bool]$FiniteWater;omm=[bool]$EnableOmm;presets=$Presets;qualities=$Qualities;
+        compareWaterBounds=[bool]$CompareWaterBounds;waterBoundsSequence=$WaterBoundsSequence;
         sourceHead=(& git rev-parse HEAD);sourceDirty=[bool](& git status --porcelain);
         providerSha256=(Get-FileHash -LiteralPath $ProviderJar).Hash;initialSeconds=$InitialSeconds;
         waterShaderBaseline=if($WaterShaderBaseline){$taskBaseline}else{''};waterShaderSequence=$WaterShaderSequence;
@@ -75,6 +84,12 @@ try {
     } | ConvertTo-Json | Set-Content -LiteralPath "run-smoke/performance-smoke/$Label/run.json" -Encoding utf8
     if($WaterShaderBaseline -and !(Select-String -LiteralPath "$Label.log" -Pattern 'GYSF_SHADER_COMPARE: complete switches=\d+ liveAlternates=0' -Quiet)) {
         throw 'Missing alternate-pipeline lifetime qualification'
+    }
+    if($CompareWaterBounds) {
+        $taskExpectedSelections=$Presets.Split(',').Count
+        if(!(Select-String -LiteralPath "$Label.log" -Pattern "GYSF_BOUNDS_COMPARE: complete selections=$taskExpectedSelections released=[1-9]\d* liveAlternates=0" -Quiet)) {
+            throw 'Missing alternate-water-BLAS lifetime qualification'
+        }
     }
     Write-Output "Evidence: run-smoke/performance-smoke/$Label; log: $Label.log"
 } finally { $env:JAVA_TOOL_OPTIONS=$savedJavaOptions;Pop-Location }

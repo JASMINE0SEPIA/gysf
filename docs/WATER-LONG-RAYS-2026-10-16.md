@@ -57,3 +57,6 @@ analytic oracle plus the existing near/grazing suites does not establish every l
 first-root case or natural shoreline topology. Complex shorelines, temporal optical quality,
 long-frame behavior and useful full-world performance remain open. Finite water stays default off;
 the player's PCL package, settings and worlds are unchanged.
+
+The next [matched water-bounds diagnostic](WATER-BOUNDS-2026-10-16.md) identifies a larger
+performance target without changing this checkpoint's shipping geometry.

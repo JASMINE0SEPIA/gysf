@@ -59,7 +59,7 @@ public final class PerformanceCapture {
             try { Files.createDirectories(output); }
             catch(IOException e){throw new UncheckedIOException(e);}
             if(Files.exists(output.resolve("frames.csv")))throw new IllegalStateException("Fresh performance label required");
-            rows.append("phase,rr,preset,elapsedMs,intervalMs,rtFrame,processBytes,budgetBytes,rtAllocationBytes,lodBytes,providerBytes,nearRadius,nearInstances,lodSections,deferrals,cameraX,cameraY,cameraZ,yaw,pitch,screen,lodRevision,texturedBuilds,atomicSwaps,nearTable,nearBuildToken,quality,renderWidth,renderHeight,displayWidth,displayHeight,filter,spp,bounces,finiteWater,omm,nearPending,lodPending,waterUploads,waterKnownNodes,waterPending,waterShader,waterHitShader\n");
+            rows.append("phase,rr,preset,elapsedMs,intervalMs,rtFrame,processBytes,budgetBytes,rtAllocationBytes,lodBytes,providerBytes,nearRadius,nearInstances,lodSections,deferrals,cameraX,cameraY,cameraZ,yaw,pitch,screen,lodRevision,texturedBuilds,atomicSwaps,nearTable,nearBuildToken,quality,renderWidth,renderHeight,displayWidth,displayHeight,filter,spp,bounces,finiteWater,omm,nearPending,lodPending,waterUploads,waterKnownNodes,waterPending,waterShader,waterHitShader,waterBoundsVariant,waterBoundsSource,waterBoundsChildren,waterWaveStrength,waterWaveSpeed,waterWaveCount\n");
             // A non-RR control must not silently inherit another vendor filter/upscaler or FG.
             CausticaConfig.Rt.Fsr.ENABLED.set(false);CausticaConfig.Rt.Xess.ENABLED.set(false);
             CausticaConfig.Rt.Fg.ENABLED.set(false);CausticaConfig.Rt.Nrd.ENABLED.set(false);
@@ -70,6 +70,7 @@ public final class PerformanceCapture {
             client.player.connection.sendCommand("time set noon");
             client.player.connection.sendCommand("weather clear");
             CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.set(0f);
+            WaterBoundsComparison.configure();
             preparedAt=System.nanoTime();
             System.out.println("GYSF_PERF: initial warmup; fixed camera and waves; spp="+CausticaConfig.Rt.Composite.SPP.value()
                     +" bounces="+CausticaConfig.Rt.Composite.MAX_BOUNCES.value()+" OMM="+CausticaConfig.Rt.Omm.ENABLED.value()+"; wall cadence includes present");
@@ -102,7 +103,8 @@ public final class PerformanceCapture {
         }
         if(phase<0 && now-preparedAt>=INITIAL && sceneQuiet) {
             if(RtDistantHorizonsTerrain.INSTANCE.residentSectionCount()==0)throw new IllegalStateException("No published RT LOD at benchmark start");
-            phase=0;start(now);
+            WaterBoundsComparison.prepare();
+            phase=0;start(System.nanoTime());
         } else if(phase>=0 && now-phaseAt>=SETTLE+MEASURE) {
             if(intervals.size()<60)throw new IllegalStateException("Too few measured frames: "+intervals.size());
             double[] sorted=intervals.stream().mapToDouble(Double::doubleValue).sorted().toArray();
@@ -129,6 +131,7 @@ public final class PerformanceCapture {
 
     private static void start(long now) {
         WaterShaderComparison.select(phase,PRESETS.length);
+        WaterBoundsComparison.select(phase,PRESETS.length);
         int preset=PRESETS[phase];
         CausticaConfig.Rt.DlssRr.ENABLED.set(preset>=0);
         if(preset>=0)CausticaConfig.Rt.DlssRr.PRESET.set(preset);
@@ -183,7 +186,11 @@ public final class PerformanceCapture {
                 .append(RtWaterGeometry.runtimeEnabled()).append(',').append(RtDeviceBringup.ommEnabled()).append(",false,false,")
                 .append(water.uploads()).append(',').append(water.knownNodes()).append(',').append(water.pending()).append(',')
                 .append(WaterShaderComparison.measuredFingerprint(rtFrame)).append(',')
-                .append(WaterShaderComparison.measuredHitFingerprint(rtFrame)).append('\n');
+                .append(WaterShaderComparison.measuredHitFingerprint(rtFrame)).append(',')
+                .append(WaterBoundsComparison.variant()).append(',').append(WaterBoundsComparison.measuredSource(rtFrame)).append(',')
+                .append(WaterBoundsComparison.children()).append(',').append(CausticaConfig.Rt.Composite.WATER_WAVE_STRENGTH.value()).append(',')
+                .append(CausticaConfig.Rt.Composite.WATER_WAVE_SPEED.value()).append(',')
+                .append(CausticaConfig.Rt.Composite.WATER_WAVE_DETAIL.value()).append('\n');
     }
 
     public static boolean locked() {
