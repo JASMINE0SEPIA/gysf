@@ -54,6 +54,7 @@ public PathSegment tracePrimary(PathSegment seg,
                 gv_motionUseRefracted = false;
                 gv_motionObjDisp = float3(0.0, 0.0, 0.0);
                 gv_spec = makeSpecSurface(gv_hitCamRel, gv_normal, 1.0, SKY_SPEC_ALBEDO);
+                captureForeground(0,0);
             }
             return terminal;
         }
@@ -87,6 +88,7 @@ public PathSegment tracePrimary(PathSegment seg,
                     gv_spec = makeSpecSurface(gv_hitCamRel, n, float3(payload.motionPrev), rough,
                                               rrSpecularAlbedo(payload.f0, rough, dot(n, v)));
                 }
+                captureForeground(payload.flags,material+1u);
             }
 
             return terminal;
@@ -107,7 +109,9 @@ public PathSegment tracePrimary(PathSegment seg,
         float3 previousNormal = n;
         WaterWaves waterSurf = flatWaterWaves(hitPos, payload.hitT, geometricNormal);
         if(isWater && finiteWaterHit()) {
-            waterSurf=finiteWaterFromPayload(hitPos,payload.hitT,n);
+            waterSurf=finiteWaterFromPayload(hitPos,payload.hitT,float3(payload.normal));
+            n=waterSurf.normal;
+            geometricNormal=waterSurf.geometricNormal;
             previousNormal=waterSurf.previousNormal;
         } else if (isWater && waterWaves) {
             float waterFootprint = rayConeWidth / max(abs(dot(-rd, geometricNormal)), 0.2);
@@ -138,6 +142,7 @@ public PathSegment tracePrimary(PathSegment seg,
                                       isWater ? waterSurf.motionPrev : float3(payload.motionPrev),
                                       gv_rough, float3(F, F, F));
             gv_spec.planePos = waterSurf.planePos;
+            captureForeground(payload.flags,material+1u);
             if (dot(transmittedDir, transmittedDir) > 0.0) {
                 MediumStack guideMedium = medium;
                 if (entering) {

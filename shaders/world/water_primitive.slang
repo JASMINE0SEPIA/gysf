@@ -37,7 +37,14 @@ public WaterWaves primitiveWaterWaves(WaterPrimitive primitive,float3 translatio
         WaterPatch previous=worldPush.waterPreviousFieldAddr==0?patch:
                 canonicalWaterCell(patch,worldPush.waterPreviousFieldAddr,position.xz,sourceY);
         patchField(current,position.xz,currentT,0.0,height,gradient);
-        patchField(previous,position.xz,previousT,0.0,previousHeight,previousGradient);
+        bool sameDomain=all(current.minimum==previous.minimum)&&all(current.extent==previous.extent)
+                &&all(current.shore==previous.shore);
+        bool samePhase=currentT==previousT||waterWaveSpeedScale()==0.0||waterWaveStrengthScale()==0.0;
+        if(sameDomain&&samePhase) {
+            previousHeight=height;previousGradient=gradient;
+        } else {
+            patchField(previous,position.xz,previousT,0.0,previousHeight,previousGradient);
+        }
         waves.normal=waterSurfaceNormal(restNormal,gradient);
         waves.previousNormal=waterSurfaceNormal(restNormal,previousGradient);
         waves.motionPrev=float3(0,height-previousHeight,0);

@@ -38,5 +38,5 @@ int main(int argc,char** argv){
   for(size_t i=0;i<rays.size();i++)file<<i<<','<<rays[i].x<<','<<rays[i].y<<','<<rays[i].z<<','<<rays[i].w<<'\n';}
  return out[1]==4096 && out[0]==0 && out[2]>0 && out[3]>0 && out[4]==0 && out[5]==0 && out[10]==0
      && out[11]==0 && out[12]==21 && out[13]==0 && out[15]==0 && out[16]==0 && out[18]==0 && out[19]==10
-     && out[20]==0 && out[21]==4273?0:1;
+     && out[20]==0 && out[21]==8587?0:1;
 }

@@ -511,11 +511,12 @@ void payloadSetFiniteWater(inout Payload result,Section section,uint primitiveIn
             waterWavesEnabled(),worldPush.waterAnchor.x,worldPush.waterAnchor.z);
     bool entering=dot(WorldRayDirection(),waves.normal)<0;
     float flip=entering?1.0:-1.0;
-    result.albedo=half3(tint);result.normal=half3(waves.normal*flip);result.hitT=RayTCurrent();
+    result.albedo=half3(tint);result.normal=half3(storeWaterGuideNormal(waves.normal*flip));result.hitT=RayTCurrent();
     result.motionPrev=half3(waves.motionPrev);result.f0=half3(0.02h,0.02h,0.02h);
-    result.previousWaterNormal=packPreviousWaterGuideNormal(waves.previousNormal*flip);
+    result.previousWaterNormal=packWaterNormalHistory(waves.normal*flip,waves.previousNormal*flip);
     payloadSetPacked(result,MATERIAL_WATER,material.params.x,0,0,0,material.params.z,material.params.w,EMISSION_SOURCE_NONE);
     result.flags|=PAYLOAD_FINITE_WATER;
+    if((InstanceID()&DH_INSTANCE_KIND)==DH_INSTANCE_KIND)result.flags|=PAYLOAD_WATER_LOD;
     payloadSetDielectric(result,MATERIAL_WATER,entering);
 }
 
@@ -601,8 +602,10 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
         payload.normal = half3(dn);
         payload.hitT = RayTCurrent();
         payload.motionPrev = half3(0.0h, 0.0h, 0.0h);
-        float dhRoughness = dhMaterialRoughness(dhMaterial, dhHeader.params.x);
-        float dhMetalness = dhMaterialMetalness(dhMaterial, dhHeader.params.y);
+        // API 5 retains the exact block-state material profile. The legacy mini-material clamp
+        // turns smooth quartz from alpha .1225 into .25 and discards metals at the ownership seam.
+        float dhRoughness = textured ? dhHeader.params.x : dhMaterialRoughness(dhMaterial, dhHeader.params.x);
+        float dhMetalness = textured ? dhHeader.params.y : dhMaterialMetalness(dhMaterial, dhHeader.params.y);
         float dhSss = dhMaterialSss(dhMaterial);
         payload.f0 = half3(lerp(float3(0.04, 0.04, 0.04), dhColour, dhMetalness));
         payloadSetPacked(payload, MATERIAL_OPAQUE, dhRoughness, dhMetalness, dhEmission, dhSss,

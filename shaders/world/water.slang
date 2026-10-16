@@ -225,11 +225,26 @@ public float3 unpackWaterGuideNormal(uint packed) {
     return normalize(n);
 }
 
+public float3 storeWaterGuideNormal(float3 normal) {
+    // Both temporal paths use explicit FP16 rounding. A bare half3 cast in the hit shader can
+    // otherwise differ from the history codec, even when its analytic input is identical.
+    return float3(f16tof32(f32tof16(normal.x)),f16tof32(f32tof16(normal.y)),f16tof32(f32tof16(normal.z)));
+}
+
+// Neither signed oct coordinate can be -32768: the encoder clamps to [-32767,32767].
+// Reserve that unreachable pair for an exactly unchanged surface, avoiding oct quantization motion.
+public static const uint WATER_NORMAL_UNCHANGED=0x80008000u;
+
 public uint packPreviousWaterGuideNormal(float3 normal) {
-    // Match the previous frame's half3 payload storage before the higher-precision oct encoding.
-    // Otherwise frozen waves acquire a false normal delta from using different current/history codecs.
-    float3 stored=float3(f16tof32(f32tof16(normal.x)),f16tof32(f32tof16(normal.y)),f16tof32(f32tof16(normal.z)));
-    return packWaterGuideNormal(stored);
+    return packWaterGuideNormal(storeWaterGuideNormal(normal));
+}
+
+public uint packWaterNormalHistory(float3 current,float3 previous) {
+    return all(current==previous)?WATER_NORMAL_UNCHANGED:packPreviousWaterGuideNormal(previous);
+}
+
+public float3 previousWaterGuideNormal(float3 current,uint history) {
+    return history==WATER_NORMAL_UNCHANGED?current:unpackWaterGuideNormal(history);
 }
 
 public bool finiteWaterHit() { return (payload.flags&PAYLOAD_FINITE_WATER)!=0u; }
@@ -237,8 +252,10 @@ public bool finiteWaterHit() { return (payload.flags&PAYLOAD_FINITE_WATER)!=0u; 
 // The acceleration structure already reported the displaced surface. Preserve that point and
 // its actual normal for optical bias; no rest-plane projection or second Newton solve is needed.
 public WaterWaves finiteWaterFromPayload(float3 position,float hitT,float3 normal) {
-    WaterWaves waves=flatWaterWaves(position,hitT,normal);
-    waves.previousNormal=unpackWaterGuideNormal(payload.previousWaterNormal);
+    // FP16 components are no longer exactly unit length. Fresnel, refraction and reflection
+    // reprojection must consume the same normalized interface on every continuation path.
+    WaterWaves waves=flatWaterWaves(position,hitT,normalize(normal));
+    waves.previousNormal=previousWaterGuideNormal(waves.normal,payload.previousWaterNormal);
     waves.motionPrev=float3(payload.motionPrev);
     return waves;
 }

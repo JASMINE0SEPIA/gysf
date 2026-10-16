@@ -305,7 +305,9 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex,
             float3 geometricNormal = n; // unrippled; ray origins offset along this
             WaterWaves waterSurf = flatWaterWaves(hitPos, payload.hitT, geometricNormal);
             if(isWater && finiteWaterHit()) {
-                waterSurf=finiteWaterFromPayload(hitPos,payload.hitT,n);
+                waterSurf=finiteWaterFromPayload(hitPos,payload.hitT,float3(payload.normal));
+                n=waterSurf.normal;
+                geometricNormal=waterSurf.geometricNormal;
             } else if (isWater && waterWaves) {
                 float waterFootprint = rayConeWidth / max(abs(dot(-rd, geometricNormal)), 0.2);
                 waterSurf = evaluateWaterWaves(ro, rd, payload.hitT, geometricNormal,

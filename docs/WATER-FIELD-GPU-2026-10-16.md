@@ -147,8 +147,11 @@ with live RR: 14117 RT frames, no LOD deferrals, no field residency/shutdown
 marker (no field GPU allocations), and zero native LOD live bytes at exit.
 Frame counts across these different processes/scenes are not an FPS comparison.
 
-Next optical work must lock the effective camera and compare near-only against
-near/LOD guides (normals, depth, roughness/material and motion), then quantify
+The subsequent [fixed-camera GPU guide comparison](WATER-GUIDES-2026-10-16.md)
+finds and fixes static normal-history, biased-reflection motion and a near/LOD
+roughness mismatch. Four clean flat-pool controls pass geometry, guide and depth
+checks; that document records exact scope and maximum errors. Next work must
+extend optical checks to natural topology and animated edits, and quantify
 finite traversal and complete-frame cost under matched settings. Varying-height
 coarse shore topology, approximate/unvisited source fallback, waterlogged/covered
 edits and long-travel temporal quality remain open before enabling by default.

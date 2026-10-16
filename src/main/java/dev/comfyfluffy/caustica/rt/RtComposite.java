@@ -295,6 +295,7 @@ public final class RtComposite {
                 flags |= FEATURE_VIEWZ;
             }
         }
+        if(RtGuideCapture.enabled())flags|=FEATURE_VIEWZ;
         return flags;
     }
 
@@ -1022,7 +1023,7 @@ public final class RtComposite {
                 pushRing = new PushSlot[PUSH_RING];
                 for (int i = 0; i < PUSH_RING; i++) {
                     pushRing[i] = new PushSlot(ctx.createBuffer(WORLD_PUSH_BUFFER_SIZE,
-                            VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true, "rt world push " + i));
+                            VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT|VK10.VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, "rt world push " + i));
                 }
             }
             if (output != null) {
@@ -1597,6 +1598,7 @@ public final class RtComposite {
                 jitterX = CausticaJitter.INSTANCE.jitterPixelsX() * jitterSignX();
                 jitterY = CausticaJitter.INSTANCE.jitterPixelsY() * jitterSignY();
             }
+            if(RtGuideCapture.enabled()){jitterX=0;jitterY=0;}
             // FG reads the frame's jitter at present time (PREPARE wants the offset the rays used).
             fgJitterX = jitterX;
             fgJitterY = jitterY;
@@ -1682,6 +1684,7 @@ public final class RtComposite {
             // boundary. Transport each wave's full-origin phase instead; shader positions stay local.
             Float4 waterAnchor = new Float4(waveFrame.currentTime(), 0f, waveFrame.previousTime(), 0f);
             var waterFields=waterField.frame(ctx,terrain,camX,camY,camZ,graphicsUse,graphicsUseWaiter);
+            long guideCaptureAddress=RtGuideCapture.INSTANCE.begin(ctx,renderW,renderH,frameCounter,graphicsUseWaiter);
 
             // Rebuild the TLAS this frame from static section instances merged with dynamic entity
             // instances, bind it into the pipeline's descriptor ring, record the build, then barrier so
@@ -1732,6 +1735,7 @@ public final class RtComposite {
                     waterParams,
                     waterAnchor,
                     waterFields.current(),waterFields.previous(),
+                    guideCaptureAddress,
                     new Int4((flags&1)^(RtWaterCameraProbe.validationEnabled()
                             && Boolean.getBoolean("gysf.rt.testInvertCameraHint") ? 1 : 0),
                             0,Float.floatToRawIntBits(-1f),Float.floatToRawIntBits(-1f)),
@@ -1860,6 +1864,21 @@ public final class RtComposite {
                 active.trace(cmd, renderW, renderH, pushConstants, 1);
             }
             VulkanCommandEncoder.memoryBarrier(cmd, stack); // RT writes visible to the temporal/upscale reads
+            if(guideCaptureAddress!=0) {
+                RtGuideCapture.INSTANCE.record(ctx,cmd,stack,pushBuf,WorldPushData.BYTE_SIZE,
+                        java.util.List.of(new RtGuideCapture.Image("normal","rgba16f",8,gNormal),
+                                new RtGuideCapture.Image("albedo","rgba16f",8,gAlbedo),
+                                new RtGuideCapture.Image("depth","r32f",4,gDepth),
+                                new RtGuideCapture.Image("motion","rg16f",4,gMotion),
+                                new RtGuideCapture.Image("spec-albedo","rgba16f",8,gSpecAlbedo),
+                                new RtGuideCapture.Image("spec-motion","rg16f",4,gSpecMotion),
+                                new RtGuideCapture.Image("view-z","r32f",4,gViewZ),
+                                new RtGuideCapture.Image("radiance","rgba16f",8,output)),
+                        java.util.Map.of("camera",java.util.List.of(camX,camY,camZ),
+                                "terrainOrigin",java.util.List.of(terrain.blockX,terrain.blockY,terrain.blockZ),
+                                "dlssRr",rrPath,"waveStrength",CausticaConfig.Rt.Composite.WATER_WAVE_STRENGTH.value()),
+                        waterField.copyImage(waterFields.current()),waterField.copyImage(waterFields.previous()));
+            }
             // A FOV change does NOT need to restart accumulation, so nothing here does.
             //
             // The history is fetched through the motion vectors, and the tracer builds those with
@@ -2170,6 +2189,7 @@ public final class RtComposite {
         // Do not attach a merely reserved token: failed recording may never signal it. Once execute succeeds,
         // every owner in this frame's manifest is protected through the final overlay consumer.
         RtEntities.INSTANCE.markGraphicsUse(frameEntities, graphicsUse);
+        RtGuideCapture.INSTANCE.submitted(graphicsUse);
     }
 
     /**
@@ -2775,6 +2795,7 @@ public final class RtComposite {
         // longer in flight and can be freed immediately.
         tlasRing.destroy();
         waterField.destroy();
+        RtGuideCapture.INSTANCE.destroy();
         sharc.destroy(RtContext.currentOrNull());
         // Unconditional: RtDlssRr.enabled() reflects the CURRENT toggles, and the denoiser toggle can
         // have been turned off after a feature was already created. destroy() is a no-op when nothing

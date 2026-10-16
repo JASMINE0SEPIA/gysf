@@ -89,6 +89,7 @@ public struct WorldPush {
     public float4   waterAnchor;      // x current / z previous wave seconds relative to the same 8 s base
     public uint64_t waterFieldAddr;   // immutable canonical current field, 0 for legacy providers
     public uint64_t waterPreviousFieldAddr;
+    public uint64_t guideCaptureAddr; // optional one-frame raw interface readback, otherwise 0
     public uint4    waterCamera;      // x submerged:1 / perspective-probed:2; y diagnostics; zw hit distances as uint
     public WaterWaveDomain waterWaveDomains[7]; // CPU origin phases, evaluated with rebased hit coordinates
     public float4x4 curViewProj;      // forward camera-relative view-projection
@@ -343,6 +344,7 @@ public static const uint PAYLOAD_WEATHER = 512u;
 // nearby torch, the sun, GI) can ever illuminate or reflect off the portal's starfield.
 public static const uint PAYLOAD_END_PORTAL_UNLIT = 1024u;
 public static const uint PAYLOAD_FINITE_WATER = 2048u;
+public static const uint PAYLOAD_WATER_LOD = 4096u; // provenance without increasing the ray payload
 // Set by world.rchit on a terrain hit whose prim carries TERRAIN_PRIM_IN_LIGHT_BUFFER: this emitter is
 // RIS-sampled, so raygen gates its direct-hit emission on diffuse continuation rays (no double count).
 public static const uint PAYLOAD_EMITTER_IN_LIST = 128u;

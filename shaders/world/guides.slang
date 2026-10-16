@@ -11,6 +11,7 @@ import math;
 import medium;
 import water;
 import trace;
+import reflection_motion;
 
 public static float3 gv_normal = float3(0.0, 0.0, 0.0);
 public static float3 gv_albedo = float3(0.0, 0.0, 0.0);
@@ -34,6 +35,19 @@ public struct SpecSurface {
     public float3 albedo;         // specular albedo fed to DLSS-RR for demodulation (0 = pure diffuse)
 };
 public static SpecSurface gv_spec = {};
+
+// Snapshot before a transmission probe overwrites the hit payload. No extra payload lanes or
+// long-lived per-ray globals are needed when this diagnostic is disabled.
+public void captureForeground(uint flags,uint kind) {
+    if(worldPush.guideCaptureAddr==0)return;
+    uint3 pixel=DispatchRaysIndex(),size=DispatchRaysDimensions();
+    DevicePtr<float4> capture=DevicePtr<float4>(worldPush.guideCaptureAddr);
+    uint index=(pixel.y*size.x+pixel.x)*4u;
+    capture[index]=float4(gv_spec.camRel,float(flags));
+    capture[index+1]=float4(gv_spec.normal,gv_spec.roughness);
+    capture[index+2]=float4(gv_spec.previousNormal,float(kind));
+    capture[index+3]=float4(gv_spec.motionPrev,length(gv_spec.camRel));
+}
 
 // Static surfaces reuse one normal for all three roles. Water overrides them (height-field shading
 // point, waved normal now and last frame, flat geometric normal for the bias) via the explicit form.
@@ -60,36 +74,13 @@ public SpecSurface makeSpecSurface(float3 camRel, float3 normal, float3 motionPr
                             float roughness, float3 albedo) {
     return makeSpecSurface(camRel, normal, normal, normal, motionPrev, roughness, albedo);
 }
-// angle can land behind the eye even though the reflector itself is comfortably in view.
-public float2 projectPrevNdc(float3 worldPos, out bool valid) {
-    float4 clip = mul(worldPush.prevViewProj, float4(worldPos - worldPush.camOffset + worldPush.camDelta, 1.0));
-    valid = clip.w > 0.0;
-    return valid ? clip.xy / clip.w : float2(0.0, 0.0);
-}
-
-// Previous-frame screen position of a planar reflection. The reflected image of a world point P seen
-// in a planar reflector is the MIRROR image V = mirror(P) across the surface plane: the eye sees V
-// along a straight line, so the reflection appears at proj(V). Project the mirror image directly.
-// Gotcha: intersecting a reflection ray with the surface plane divides by dot(mirrorDir, n), which
-// explodes at grazing angles and produces non-zero MV in a static scene. Mirroring is division-free, so
-// static MV is bit-exact zero at any incidence. The reflector is assumed static (terrain / water);
-// reflectedMotionPrev carries the reflected content's own displacement.
-public float2 previousReflectionNdc(float3 surfacePos, float3 surfaceNormal, float3 surfaceMotionPrev,
-                             float3 reflectedWorldPos, float3 reflectedMotionPrev, out bool valid) {
-    float3 n = normalize(surfaceNormal); // mirror(P) is orientation-independent, so no viewer flip needed
-    float3 previousSurfacePos = surfacePos - surfaceMotionPrev;
-    float3 prevHit = reflectedWorldPos - reflectedMotionPrev;
-    float3 mirroredHit = prevHit - 2.0 * n * dot(prevHit - previousSurfacePos, n);
-    return projectPrevNdc(mirroredHit, valid);
-}
-
 // Reflection guides remain owned by the physical foreground interface even when transmission later
 // replaces the ordinary guide tuple. The same non-SER probe resolves both motion and, for exact
 // mirrors, the reflected terminal's diffuse content. Destinations without a stable diffuse albedo keep
 // the foreground material reflectance: sky, emissive surfaces, metals, and another dielectric/mirror
 // would otherwise give RR a zero or recursively defined demodulation signal.
 public float2 resolveSpecularGuides(SpecSurface surface, float3 primaryDir,
-                             float2 currentNdc, float2 size, float primaryConeSpread,
+                             float2 size, float primaryConeSpread,
                              out float3 specAlbedo) {
     specAlbedo = surface.albedo;
     if (length(surface.normal) < 0.5
@@ -136,12 +127,10 @@ public float2 resolveSpecularGuides(SpecSurface surface, float3 primaryDir,
         reflectedMotionPrev = float3(0.0, 0.0, 0.0);
     }
     float3 previousN = length(surface.previousNormal) >= 0.5
-            ? normalize(surface.previousNormal) : n;
-    bool prevValid;
-    float2 prevNdc = previousReflectionNdc(
-            surfacePos, previousN, surface.motionPrev,
-            reflectedHit, reflectedMotionPrev, prevValid);
-    return prevValid ? (prevNdc - currentNdc) * 0.5 * size : float2(0.0, 0.0);
+            ? surface.previousNormal : surface.normal;
+    bool valid;
+    return reflectionMotionNdc(surfacePos,surface.normal,previousN,surface.motionPrev,
+            reflectedHit,reflectedMotionPrev,valid)*0.5*size;
 }
 
 public void setTransmissionGuide(float3 hitCamRel, float3 motionPrev, float3 normal,
@@ -233,7 +222,9 @@ public void resolveTransmissionGuide(float3 origin, float3 transmittedDir,
         float3 interfaceNormal = geometricNormal;
         WaterWaves waterSurf = flatWaterWaves(interfacePos, payload.hitT, geometricNormal);
         if(isWater && finiteWaterHit()) {
-            waterSurf=finiteWaterFromPayload(interfacePos,payload.hitT,interfaceNormal);
+            waterSurf=finiteWaterFromPayload(interfacePos,payload.hitT,float3(payload.normal));
+            interfaceNormal=waterSurf.normal;
+            geometricNormal=waterSurf.geometricNormal;
         } else if (isWater && waterWavesEnabled()) {
             float waterFootprint = rayConeWidth
                     / max(abs(dot(-direction, geometricNormal)), 0.2);
@@ -277,7 +268,7 @@ public void writeGuides(int2 pix, float3 primaryDir, float2 jndc, float2 size, f
     // tuple with the transmitted destination.
     float3 specAlbedo;
     float2 specMotion = resolveSpecularGuides(
-            gv_spec, primaryDir, jndc, size, primaryConeSpread, specAlbedo);
+            gv_spec, primaryDir, size, primaryConeSpread, specAlbedo);
 
     // Hardware (non-linear, reversed-Z) depth for DLSS-RR + Frame Generation: project the camera-relative
     // primary hit through the forward view-projection and take ndc z/w — exactly the value a rasterizer

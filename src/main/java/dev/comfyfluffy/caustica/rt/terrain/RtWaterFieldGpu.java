@@ -27,6 +27,17 @@ public final class RtWaterFieldGpu {
     public record Statistics(long uploads,long liveBytes,long peakBytes,long knownNodes,int requested,int available,int pending) {}
     public Statistics statistics() {return new Statistics(uploads,liveBytes,peakBytes,knownNodes,requested,available,pending);}
 
+    /** Read-only diagnostic copy while the render thread owns an immutable generation. */
+    public byte[] copyImage(long address) {
+        if(address==0)return new byte[0];
+        for(var slot:slots)if(slot!=null&&slot.buffer!=null&&slot.buffer.deviceAddress==address) {
+            int words=MemoryUtil.memGetInt(slot.buffer.mapped+12);
+            if(words<4||(long)words*4>slot.buffer.size)throw new IllegalStateException("Invalid live water field image size");
+            byte[] bytes=new byte[words*4];MemoryUtil.memByteBuffer(slot.buffer.mapped,bytes.length).get(bytes);return bytes;
+        }
+        throw new IllegalStateException("Diagnostic water field is not resident");
+    }
+
     public Frame frame(RtContext ctx,RtTerrain near,double camX,double camY,double camZ,
                        RtGpuExecutor.GraphicsUse use,RtGpuExecutor.GraphicsUseWaiter waiter) {
         if(!RtWaterGeometry.runtimeEnabled()||!VoxyWaterDomain.supported())return new Frame(0,0);

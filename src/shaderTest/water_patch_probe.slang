@@ -5,6 +5,7 @@ import water_primitive;
 import water_test_frame;
 import world_core;
 import math;
+import reflection_motion;
 RWStructuredBuffer<uint> result;
 RWStructuredBuffer<float4> rayResults;
 RWStructuredBuffer<float4> packedPrimitives;
@@ -114,6 +115,43 @@ float referencePatch(WaterPatch patch,float3 ro,float3 rd,float time,float footp
     return -1.0;
 }
 
+uint reflectionMotionChecks(out uint count) {
+    float4x4 savedCurrent=worldPush.curViewProj,savedPrevious=worldPush.prevViewProj;
+    float3 savedOffset=worldPush.camOffset,savedDelta=worldPush.camDelta;
+    worldPush.curViewProj=float4x4(1.3,0,0,0, 0,1.7,0,0, 0,0,-1,-.1, 0,0,-1,0);
+    worldPush.prevViewProj=worldPush.curViewProj;worldPush.camOffset=float3(0);worldPush.camDelta=float3(0);
+    uint failures=0;count=0;
+    for(int i=0;i<32;i++) {
+        float3 surface=float3(.3,-2,-5),normal=normalize(float3(.01*float(i),1,.003*float(i)));
+        float3 direction=normalize(float3(.003*float(i),.02+.003*float(i),-1));
+        // Include a biased ray origin, grazing rays and finite/sky endpoints.
+        float3 hit=surface+normal*.01+reflect(direction,normal)*(i%2==0?float(i+1):1e6);
+        bool valid;
+        float2 motion=reflectionMotionNdc(surface,normal,normal,float3(0),hit,float3(0),valid);
+        count++;if(!valid||any(motion!=float2(0)))failures++;
+        // Independent horizontal-plane mirror and perspective projection, with moving content,
+        // moving surface and translated camera. Tangential surface motion must cancel.
+        hit=float3(.2*float(i),3,-17-float(i));normal=float3(0,1,0);
+        float3 surfaceMotion=float3(.03,.05,-.02),hitMotion=float3(.1,-.2,.3),delta=float3(-.3,.2,.1);
+        worldPush.camDelta=delta;
+        float2 current=float2(1.3*hit.x,1.7*(2*surface.y-hit.y))/-hit.z;
+        float3 oldHit=hit-hitMotion+delta,oldSurface=surface-surfaceMotion+delta;
+        float2 previous=float2(1.3*oldHit.x,1.7*(2*oldSurface.y-oldHit.y))/-oldHit.z;
+        motion=reflectionMotionNdc(surface,normal,normal,surfaceMotion,hit,hitMotion,valid);
+        count++;if(!valid||length(motion-(previous-current))>1e-6)failures++;
+        worldPush.camDelta=float3(0);
+    }
+    bool valid;
+    float2 behind=reflectionMotionNdc(float3(0),float3(0,1,0),float3(0,1,0),float3(0),float3(0,0,2),float3(0),valid);
+    count++;if(valid||any(behind!=float2(0)))failures++;
+    // Normal rotation changes a real reflected feature even with no positional motion.
+    float2 rotated=reflectionMotionNdc(float3(0),float3(0,1,0),float3(1,0,0),float3(0),float3(2,3,-10),float3(0),valid);
+    count++;if(!valid||length(rotated-float2(-.52,1.02))>1e-6)failures++;
+    worldPush.curViewProj=savedCurrent;worldPush.prevViewProj=savedPrevious;
+    worldPush.camOffset=savedOffset;worldPush.camDelta=savedDelta;
+    return failures;
+}
+
 uint runtimePrimitiveChecks(out uint count,out float maxNormalError) {
     uint failures=0;count=0;maxNormalError=0;
     float4x4 savedProjection=worldPush.invViewProj;float3 savedCamera=worldPush.camOffset;
@@ -150,10 +188,20 @@ uint runtimePrimitiveChecks(out uint count,out float maxNormalError) {
         float error=length(normal-unpackWaterGuideNormal(packWaterGuideNormal(normal)));
         count++;maxNormalError=max(maxNormalError,error);
         if(!isfinite(error)||error>.0001)failures++;
+        uint history=packWaterNormalHistory(normal,normal);
+        float3 stored=normalize(storeWaterGuideNormal(normal));
+        count++;
+        if(history!=WATER_NORMAL_UNCHANGED||any(previousWaterGuideNormal(stored,history)!=stored)
+                ||packWaterGuideNormal(normal)==WATER_NORMAL_UNCHANGED)failures++;
         float3 current=normalize(float3(f16tof32(f32tof16(normal.x)),f16tof32(f32tof16(normal.y)),f16tof32(f32tof16(normal.z))));
         error=length(current-unpackWaterGuideNormal(packPreviousWaterGuideNormal(normal)));
         count++;maxNormalError=max(maxNormalError,error);
         if(!isfinite(error)||error>.0001)failures++;
+        float3 oldNormal=normalize(normal+float3(.13,-.07,.11));
+        history=packWaterNormalHistory(normal,oldNormal);
+        error=length(normalize(storeWaterGuideNormal(oldNormal))-previousWaterGuideNormal(stored,history));
+        count++;maxNormalError=max(maxNormalError,error);
+        if(history==WATER_NORMAL_UNCHANGED||!isfinite(error)||error>.0001)failures++;
     }
     WaterPrimitive p;p.v0=float4(0,15.875,0,1);p.v1=float4(0,15.875,1,1);p.v2=float4(1,16,1,0);
     p.rectangle=float4(0,0,1,1);p.shore=float4(1);
@@ -179,7 +227,15 @@ uint runtimePrimitiveChecks(out uint count,out float maxNormalError) {
         count++;
         if(length(waves.previousNormal-expectedNormal)>.001||abs(position.y-waves.motionPrev.y-15.90625-oldHeight)>1e-5
                 ||length(waves.position-position)>0||length(waves.geometricNormal-waves.normal)>0)failures++;
+        float savedSpeed=worldPush.waterOpacity.z;worldPush.waterOpacity.z=0;
+        WaterWaves frozen=primitiveWaterWaves(p,float3(0),position,2,true,time,previous);
+        worldPush.waterOpacity.z=savedSpeed;
+        WaterWaves reset=primitiveWaterWaves(p,float3(0),position,2,true,time,time);
+        count++;
+        if(any(frozen.normal!=frozen.previousNormal)||any(frozen.motionPrev!=float3(0))
+                ||any(reset.normal!=reset.previousNormal)||any(reset.motionPrev!=float3(0)))failures++;
     }
+    uint reflectionCount;failures+=reflectionMotionChecks(reflectionCount);count+=reflectionCount;
     return failures;
 }
 
