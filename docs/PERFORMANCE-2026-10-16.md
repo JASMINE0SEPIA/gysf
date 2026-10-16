@@ -1,5 +1,9 @@
 # Current-build performance investigation
 
+The later completed quality/native/SVGF matrix and paired GPU stage/model diagnostic are recorded
+in [DLSS-MATRIX-2026-10-16.md](DLSS-MATRIX-2026-10-16.md). The incomplete/rolled-back runs below
+remain historical evidence and do not substitute for that later current-build matrix.
+
 This continues the water integration on `a748a40`; it does not qualify the older installed PCL
 package. Experiments use the isolated `run-smoke` world and never modify the player's instance.
 
