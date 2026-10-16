@@ -6,7 +6,7 @@ static std::vector<uint32_t> image(const std::filesystem::path& path) {
     std::vector<uint32_t> data(size_t(file.tellg())/4);file.seekg(0);file.read((char*)data.data(),data.size()*4);return data;
 }
 struct LayerRunner:Runner {
-    std::array<Buffer,3> inputs{};
+    std::array<Buffer,4> inputs{};
     ~LayerRunner(){releaseInputs();}
     void releaseInputs() {
         if(device)vkDeviceWaitIdle(device);
@@ -16,11 +16,11 @@ struct LayerRunner:Runner {
         }
     }
     void load(const std::filesystem::path& directory) {
-        std::array<uint64_t,3> addresses{};
-        const char* names[]={"water-field-current.bin","water-field-previous.bin","water-layer-primitives.bin"};
-        for(int i=0;i<3;i++) {
+        std::array<uint64_t,4> addresses{};
+        const char* names[]={"water-field-current.bin","water-field-previous.bin","water-layer-primitives.bin","water-field-full-cell.bin"};
+        for(int i=0;i<4;i++) {
             auto data=image(directory/names[i]);auto& b=inputs[i];
-            if(i==2&&data.size()*4!=4096*2*80)throw std::runtime_error("Incorrect production primitive count/stride");
+            if(i==2&&data.size()*4!=4096*3*80)throw std::runtime_error("Incorrect production primitive count/stride");
             createBuffer(b,data.size()*4,VK_BUFFER_USAGE_STORAGE_BUFFER_BIT|VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
             check(vkMapMemory(device,b.memory,0,VK_WHOLE_SIZE,0,&b.mapped),"map layer input");std::memcpy(b.mapped,data.data(),data.size()*4);
             if(!b.coherent){VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};range.memory=b.memory;range.size=VK_WHOLE_SIZE;check(vkFlushMappedMemoryRanges(device,1,&range),"flush layer input");}

@@ -21,14 +21,25 @@ public final class RtWaterFieldImage {
         float[] primitives=packed.primitives();
         for(int p=0;p<primitives.length;p+=RtWaterGeometry.PRIMITIVE_FLOATS) {
             if(primitives[p+3]==0)continue;
-            int y=Math.addExact(originY,(int)primitives[p+11]);
+            var domain=primitives[p+3]==2?RtWaterGeometry.sourceDomain(primitives,p):null;
             int x0=Math.addExact(originX,(int)Math.floor(primitives[p+12]));
             int z0=Math.addExact(originZ,(int)Math.floor(primitives[p+13]));
             int x1=Math.addExact(originX,Math.addExact((int)Math.floor(primitives[p+12]+primitives[p+14]),1));
             int z1=Math.addExact(originZ,Math.addExact((int)Math.floor(primitives[p+13]+primitives[p+15]),1));
             for(int x=Math.floorDiv(x0,16);x<=Math.floorDiv(x1,16);x++)
-                for(int z=Math.floorDiv(z0,16);z<=Math.floorDiv(z1,16);z++)
-                    owners.add(VoxyWaterDomain.Tile.key(x,y,z));
+                for(int z=Math.floorDiv(z0,16);z<=Math.floorDiv(z1,16);z++) {
+                    if(domain==null) {
+                        owners.add(VoxyWaterDomain.Tile.key(x,Math.addExact(originY,(int)primitives[p+11]),z));
+                        continue;
+                    }
+                    // A bilinear domain's extrema on this rectangle occur at its four corners.
+                    // Include every possible layer, without scanning all 256 nodes of each owner.
+                    float a=Math.max(x0,x*16)-originX,b=Math.min(x1,x*16+15)-originX;
+                    float c=Math.max(z0,z*16)-originZ,d=Math.min(z1,z*16+15)-originZ;
+                    int ac=domain.layerAt(a,c),ad=domain.layerAt(a,d),bc=domain.layerAt(b,c),bd=domain.layerAt(b,d);
+                    int low=Math.min(Math.min(ac,ad),Math.min(bc,bd)),high=Math.max(Math.max(ac,ad),Math.max(bc,bd));
+                    for(int y=low;y<=high;y++)owners.add(VoxyWaterDomain.Tile.key(x,Math.addExact(originY,y),z));
+                }
         }
         long[] result=owners.toLongArray();java.util.Arrays.sort(result);return result;
     }

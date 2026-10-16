@@ -3,6 +3,35 @@ import world_common;
 import water;
 import water_patch;
 
+// Mirrored by RtWaterGeometry. This tolerance selects source layers only, never moves geometry.
+public static const float WATER_SOURCE_LAYER_SNAP=0.001;
+public struct WaterSourceDomain {
+    public bool varying;
+    public int layer;
+    public float2 minimum;
+    public float2 extent;
+    public float4 height;
+    public int originY;
+};
+public WaterSourceDomain constantWaterSource(int layer) {
+    WaterSourceDomain source;
+    source.varying=false;source.layer=layer;source.minimum=0;source.extent=1;source.height=0;source.originY=0;
+    return source;
+}
+public float waterSourceMix(float a,float b,float t) {
+    if(t<=0.0||a==b)return a;
+    if(t>=1.0)return b;
+    return a+(b-a)*t;
+}
+public int waterSourceLayer(WaterSourceDomain source,float2 node) {
+    if(!source.varying)return source.layer;
+    float2 uv=(node-source.minimum)/source.extent;
+    float y=waterSourceMix(waterSourceMix(source.height.x,source.height.y,uv.y),
+            waterSourceMix(source.height.z,source.height.w,uv.y),uv.x);
+    int layer=int(floor(y));
+    return source.originY+(y-float(layer)<=WATER_SOURCE_LAYER_SNAP?layer-1:layer);
+}
+
 // RtWaterFieldImage uses uint words throughout; this layout has no implementation-specific padding.
 uint fieldWord(uint64_t address,uint index) {
     __target_switch {
@@ -64,6 +93,22 @@ public WaterPatch canonicalWaterCell(WaterPatch patch,uint64_t address,float2 lo
     return patch;
 }
 
+public float4 waterCellWeights(uint64_t address,int2 cell,WaterSourceDomain source) {
+    int2 worldCell=worldPush.sharcGridOrigin.xz+cell;
+    int4 layers=int4(waterSourceLayer(source,float2(cell)),waterSourceLayer(source,float2(cell+int2(0,1))),
+            waterSourceLayer(source,float2(cell+int2(1,0))),waterSourceLayer(source,float2(cell+1)));
+    if(all(layers==layers.x))return waterCellWeights(address,worldCell,layers.x);
+    return float4(waterNodeWeight(waterNodeWord(address,worldCell,layers.x)),
+            waterNodeWeight(waterNodeWord(address,worldCell+int2(0,1),layers.y)),
+            waterNodeWeight(waterNodeWord(address,worldCell+int2(1,0),layers.z)),
+            waterNodeWeight(waterNodeWord(address,worldCell+1,layers.w)));
+}
+public WaterPatch canonicalWaterCell(WaterPatch patch,uint64_t address,float2 local,WaterSourceDomain source) {
+    int2 cell=int2(floor(local));patch.minimum=float2(cell);patch.extent=float2(1);
+    patch.shore=waterCellWeights(address,cell,source);
+    return patch;
+}
+
 // Skip the 15x15 interior of a uniformly known/unknown tile; its outermost unit strips still
 // interpolate the neighboring owners. This preserves exact unit-cell sampling at tile borders.
 public bool constantWaterRegion(uint64_t address,int2 cell,int sourceY,out float weight,
@@ -80,7 +125,19 @@ public bool constantWaterRegion(uint64_t address,int2 cell,int sourceY,out float
     return true;
 }
 
-public float intersectCanonicalWaterPatch(WaterPatch original,int sourceY,float3 ro,float3 rd,
+public bool constantWaterRegion(uint64_t address,int2 cell,WaterSourceDomain source,out float weight,
+        out float2 minimum,out float2 maximum) {
+    if(!source.varying)return constantWaterRegion(address,cell,source.layer,weight,minimum,maximum);
+    int2 owner=(worldPush.sharcGridOrigin.xz+cell)>>4;
+    minimum=float2(owner*16-worldPush.sharcGridOrigin.xz);maximum=minimum+15;weight=0;
+    int4 layers=int4(waterSourceLayer(source,minimum),waterSourceLayer(source,float2(minimum.x,maximum.y)),
+            waterSourceLayer(source,float2(maximum.x,minimum.y)),waterSourceLayer(source,maximum));
+    if(all(layers==layers.x))return constantWaterRegion(address,cell,layers.x,weight,minimum,maximum);
+    minimum=float2(cell);maximum=minimum+1;
+    return false;
+}
+
+public float intersectCanonicalWaterPatch(WaterPatch original,WaterSourceDomain source,float3 ro,float3 rd,
         float time,float footprint,float rayMin,float rayMax,out uint work,out bool exhausted) {
     float lower,upper,curvature;WaterPatch broad=original;broad.shore=float4(1);
     patchBounds(broad,rd.xz,footprint,lower,upper,curvature);
@@ -93,8 +150,8 @@ public float intersectCanonicalWaterPatch(WaterPatch original,int sourceY,float3
     for(int step=0;step<2048;step++) {
         WaterPatch patch=original;patch.minimum=float2(cell);patch.extent=float2(1);
         float2 minimum=float2(cell),maximum=minimum+1;float weight;
-        if(constantWaterRegion(worldPush.waterFieldAddr,cell,sourceY,weight,minimum,maximum))patch.shore=float4(weight);
-        else patch.shore=waterCellWeights(worldPush.waterFieldAddr,worldPush.sharcGridOrigin.xz+cell,sourceY);
+        if(constantWaterRegion(worldPush.waterFieldAddr,cell,source,weight,minimum,maximum))patch.shore=float4(weight);
+        else patch.shore=waterCellWeights(worldPush.waterFieldAddr,cell,source);
         float tx=rd.x==0?1e30:((rd.x>0?maximum.x:minimum.x)-ro.x)/rd.x;
         float tz=rd.z==0?1e30:((rd.z>0?maximum.y:minimum.y)-ro.z)/rd.z;
         float end=min(hi,min(tx,tz));
@@ -118,4 +175,8 @@ public float intersectCanonicalWaterPatch(WaterPatch original,int sourceY,float3
         lo=max(lo,end);
     }
     exhausted=true;return -1;
+}
+public float intersectCanonicalWaterPatch(WaterPatch original,int sourceY,float3 ro,float3 rd,
+        float time,float footprint,float rayMin,float rayMax,out uint work,out bool exhausted) {
+    return intersectCanonicalWaterPatch(original,constantWaterSource(sourceY),ro,rd,time,footprint,rayMin,rayMax,work,exhausted);
 }

@@ -65,7 +65,55 @@ final class RtWaterGeometryTest {
         }
         float[] vertices={0,1.8f,0,0,2.2f,1,1,1.9f,1,1,1.8f,0};
         var data=RtWaterGeometry.pack(vertices,mainDiagonal(),0,2,null);
-        assertEquals(2,data.primitives()[11]);assertEquals(2,data.primitives()[31]);
+        assertEquals(2,data.primitives()[3]);assertEquals(2,data.primitives()[23]);
+        var expected=new RtWaterGeometry.SourceDomain(0,0,1,1,1.8f,2.2f,1.8f,1.9f);
+        assertEquals(expected,RtWaterGeometry.sourceDomain(data.primitives(),0));
+        assertEquals(expected,RtWaterGeometry.sourceDomain(data.primitives(),20));
+    }
+
+    @Test void nonplanarSourceDomainsAgreeAcrossBothDiagonalsAndCoincidentFineEdges() {
+        for(int[] diagonal:new int[][]{mainDiagonal(),{0,1,3,1,2,3}})for(int scale:new int[]{1,2,4,8,16}) {
+            float low=175+8f/9f,high=176.25f;
+            var data=RtWaterGeometry.pack(new float[]{32,low,16,32,low,16+scale,32+scale,high+(high-low),16+scale,32+scale,high,16},diagonal,0,2,null);
+            var a=RtWaterGeometry.sourceDomain(data.primitives(),0);
+            assertEquals(a,RtWaterGeometry.sourceDomain(data.primitives(),20));
+            for(int z=16;z<=16+scale;z++)assertEquals(175,a.layerAt(32,z),"shared low edge must keep the fine water layer");
+            assertEquals(176,a.layerAt(32+scale,16));
+        }
+    }
+
+    @Test void sourceLayerTiesSurviveAllMipQuantizationOffsetsAndSignedHeights() {
+        for(int base=-64;base<=320;base+=16)for(int level=0;level<=4;level++) {
+            int scale=1<<level;
+            for(int offset=0;offset<=scale;offset++) {
+                float decoded=Math.round((float)offset/scale*65535f)/65535f*scale+base;
+                assertEquals(base+offset-1,RtWaterGeometry.sourceLayer(decoded),"full-cell mip tie "+decoded);
+            }
+        }
+        for(float value:new float[]{-16.875f,-.125f,.125f,15.888889f})assertEquals((int)Math.floor(value),RtWaterGeometry.sourceLayer(value));
+        assertEquals(0,RtWaterGeometry.sourceLayer(RtWaterGeometry.SOURCE_LAYER_SNAP*2));
+    }
+
+    @Test void varyingOwnerRequestsCoverAnIndependentNodeEnumerationAtSignedWorldAnchors() {
+        for(int anchor:new int[]{-30000000,-1,0,30000000})for(int anchorY:new int[]{-128,0,128}) {
+            float[] vertices={-15,-2.75f,-17,-15,-1.25f,15,17,1.25f,15,17,.25f,-17};
+            var data=RtWaterGeometry.pack(vertices,mainDiagonal(),0,2,null);
+            var expected=new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
+            for(int x=-15;x<=18;x++)for(int z=-17;z<=16;z++) {
+                double u=Math.clamp((x+15)/32.0,0,1),v=Math.clamp((z+17)/32.0,0,1);
+                double y=(1-u)*((1-v)*-2.75+v*-1.25)+u*((1-v)*.25+v*1.25);
+                int layer=(int)Math.ceil(y-RtWaterGeometry.SOURCE_LAYER_SNAP)-1;
+                expected.add(dev.comfyfluffy.caustica.compat.VoxyWaterDomain.Tile.key(Math.floorDiv(anchor+x,16),anchorY+layer,Math.floorDiv(-anchor+z,16)));
+            }
+            long[] actual=RtWaterFieldImage.domainTiles(data,anchor,anchorY,-anchor);
+            assertEquals(expected,new it.unimi.dsi.fastutil.longs.LongOpenHashSet(actual));
+        }
+    }
+
+    @Test void sourceLayerToleranceMatchesItsShaderContract() throws Exception {
+        String shader=Files.readString(Path.of("shaders/world/water_field.slang"));
+        var value=Pattern.compile("WATER_SOURCE_LAYER_SNAP\\s*=\\s*([0-9.]+)").matcher(shader);
+        assertTrue(value.find());assertEquals(RtWaterGeometry.SOURCE_LAYER_SNAP,Float.parseFloat(value.group(1)));
     }
 
     @Test void canonicalOwnerRequestsCrossTileEdgesWithSignedOrigins() {

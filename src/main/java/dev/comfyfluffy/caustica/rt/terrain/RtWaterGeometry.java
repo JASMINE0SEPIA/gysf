@@ -10,6 +10,9 @@ public final class RtWaterGeometry {
     public static final int PRIMITIVE_BYTES = PRIMITIVE_FLOATS * Float.BYTES;
     public static final int AABB_FLOATS = 6;
     public static final float MAX_DISPLACEMENT = 2.2f; // authored 0.55 bound * maximum height slider 4
+    // Source-layer selection only: L4 UNORM16 height error plus FP32 rebasing stays below 1 mm.
+    // Rest positions, bounds and wave amplitude are not snapped.
+    public static final float SOURCE_LAYER_SNAP = 0.001f;
     private static final float PADDING = 0.0001f;
 
     public record Packed(float[] aabbs, float[] primitives, int topTriangles) {
@@ -19,6 +22,35 @@ public final class RtWaterGeometry {
     }
 
     private RtWaterGeometry() {}
+
+    public static int sourceLayer(float height) {
+        int layer=(int)Math.floor(height);
+        return height-layer<=SOURCE_LAYER_SNAP?layer-1:layer;
+    }
+
+    public record SourceDomain(float x,float z,float width,float depth,float h00,float h01,float h10,float h11) {
+        private static float mix(float a,float b,float t) {
+            if(t<=0||a==b)return a;if(t>=1)return b;
+            return a+(b-a)*t;
+        }
+        public float heightAt(float nodeX,float nodeZ) {
+            float u=(nodeX-x)/width,v=(nodeZ-z)/depth;
+            return mix(mix(h00,h01,v),mix(h10,h11,v),u);
+        }
+        public int layerAt(float nodeX,float nodeZ) {return sourceLayer(heightAt(nodeX,nodeZ));}
+    }
+
+    /** Tag two stores the missing fourth height in v2.w; both halves reconstruct one quad domain. */
+    public static SourceDomain sourceDomain(float[] p,int base) {
+        if(p[base+3]!=2)throw new IllegalArgumentException("A varying-height water packet is required");
+        float x=p[base+12],z=p[base+13];
+        float[] heights={p[base+11],p[base+11],p[base+11],p[base+11]};
+        for(int v=0;v<3;v++) {
+            int index=(p[base+v*4]>x?2:0)|(p[base+v*4+2]>z?1:0);
+            heights[index]=p[base+v*4+1];
+        }
+        return new SourceDomain(x,z,p[base+14],p[base+15],heights[0],heights[1],heights[2],heights[3]);
+    }
 
     /** Immutable CPU input for optional derived BLAS bounds; no shader attributes are duplicated. */
     public static final class BoundsInput {
@@ -73,6 +105,7 @@ public final class RtWaterGeometry {
             int indexStart = (firstTriangle + quad * 2) * 3;
             float minX = Float.POSITIVE_INFINITY, minZ = minX;
             float maxX = Float.NEGATIVE_INFINITY, maxZ = maxX,maxY=maxX;
+            int minLayer=Integer.MAX_VALUE,maxLayer=Integer.MIN_VALUE;
             for (int corner = 0; corner < 6; corner++) {
                 int vertex = indices[indexStart + corner];
                 if (vertex < 0 || vertex >= positions.length / 3) {
@@ -87,6 +120,8 @@ public final class RtWaterGeometry {
                 minX = Math.min(minX, positions[offset]); maxX = Math.max(maxX, positions[offset]);
                 minZ = Math.min(minZ, positions[offset + 2]); maxZ = Math.max(maxZ, positions[offset + 2]);
                 maxY=Math.max(maxY,positions[offset+1]);
+                int layer=sourceLayer(positions[offset+1]);
+                minLayer=Math.min(minLayer,layer);maxLayer=Math.max(maxLayer,layer);
             }
             float width = maxX - minX, depth = maxZ - minZ;
             for (int half = 0; half < 2; half++) {
@@ -108,6 +143,7 @@ public final class RtWaterGeometry {
                     throw new IllegalArgumentException("degenerate water triangle");
                 }
                 boolean top = ny / length >= 0.5;
+                primitives[target+11]=sourceLayer(maxY);
                 if (top) {
                     if (!(width > 0 && depth > 0)) {
                         throw new IllegalArgumentException("free water top has no XZ extent");
@@ -127,14 +163,21 @@ public final class RtWaterGeometry {
                         case 0b1110 -> 3; // 01,10,11: u+v>=1
                         default -> throw new IllegalArgumentException("invalid free water triangle corners");
                     };
-                    primitives[target + 3] = 1;
+                    primitives[target + 3] = minLayer==maxLayer?1:2;
                     primitives[target + 7] = shape;
+                    if(minLayer!=maxLayer) {
+                        int missing=Integer.numberOfTrailingZeros((~mask)&15);
+                        boolean found=false;
+                        for(int corner=0;corner<6;corner++) {
+                            int offset=indices[indexStart+corner]*3;
+                            int index=(positions[offset]==maxX?2:0)|(positions[offset+2]==maxZ?1:0);
+                            if(index==missing) {primitives[target+11]=positions[offset+1];found=true;break;}
+                        }
+                        if(!found)throw new IllegalArgumentException("free water quad lacks its fourth corner");
+                    }
                     tops++;
                 }
                 primitives[target + 12] = minX; primitives[target + 13] = minZ;
-                // Shared by both halves, including nonplanar quads and exact full-cell tops.
-                // A fixed epsilon fails once the local float ULP exceeds that epsilon.
-                primitives[target+11]=(float)Math.floor(Math.nextDown(maxY));
                 primitives[target + 14] = width; primitives[target + 15] = depth;
                 for (int v = 0; v < 4; v++) {
                     primitives[target + 16 + v] = shoreWeights == null ? 1 : shoreWeights[quad * 4 + v];

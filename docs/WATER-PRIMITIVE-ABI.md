@@ -14,9 +14,9 @@ Each primitive is five std430 float4 lanes (80 bytes):
 
 | Byte offset | Values | Meaning |
 | --- | --- | --- |
-| 0 | v0.xyz, freeTop | Triangle vertex 0; freeTop is 0 or 1 |
+| 0 | v0.xyz, freeTop | Triangle vertex 0; tag 0: static face, 1: constant source layer, 2: varying source height |
 | 16 | v1.xyz, shape | Triangle vertex 1; projected domain 0..3 |
-| 32 | v2.xyz, reserved | Triangle vertex 2; reserved is zero |
+| 32 | v2.xyz, source | Triangle vertex 2; tag 1: local source layer, tag 2: missing fourth-corner rest Y; ignored for tag 0 |
 | 48 | minX, minZ, width, depth | Bounds of the original full quad |
 | 64 | w00, w01, w10, w11 | Shared shoreline envelope in [0,1] |
 
@@ -26,6 +26,23 @@ so a nonplanar quad preserves its actual two planes. Flat side/bottom faces
 use a two-sided triangle intersection; disabling animation also retains the
 exact rest triangles. A flat, dry top remains a finite triangle rather than
 an infinite plane.
+
+Both halves of a free top select the same source mode. If all four corners
+select one integer water layer, tag 1 retains that layer and the existing
+same-owner field lookup. Otherwise tag 2 reuses the source lane for the
+missing fourth-corner height; each triangle reconstructs the same full
+bilinear quad height domain. Each canonical field node selects its source
+layer from that domain, including in the previous-frame shading lookup.
+This domain selects field data only; the actual rest surface still consists
+of the original two triangles. There is no extra primitive allocation.
+
+Source-layer selection uses floor(height), choosing the layer below when
+height is within 0.001 blocks above an integer. This covers L0-L4 UNORM16
+height quantization and FP32 rebasing at full-cell ties. It does not snap
+vertices, change the displacement bound, or reduce waves. CPU field-owner
+requests cover every layer needed by the domain; the shader skips a uniform
+tile region only when its source layer is constant throughout that region.
+See [the source-layer repair and evidence](WATER-LAYERS-2026-10-16.md).
 
 The separate AS build input is one Vulkan AABB per triangle: six floats
 (minXYZ, maxXYZ), 24 bytes. Only upward-facing free-top triangles grow by the
@@ -45,11 +62,14 @@ policy and must not be treated as a finished near/far transition.
 
 ## Verification and current limit
 
-The complete Gradle check passes 174 Java tests, including seven new encoder
-tests. These cover indexed order, bucket offsets, either diagonal, separate
+The current complete Gradle check passes 214 Java tests. Encoder coverage
+includes indexed order, bucket offsets, either diagonal, separate
 nonplanar planes, static faces, malformed inputs and FP32-safe padding. An
 analytic sum of the production spectrum's maximum positive amplitudes at the
 actual maximum shader slider verifies that 2.2 blocks encloses the wave field.
+Source-domain tests additionally cover both triangle reconstructions, signed
+anchors, per-owner layer coverage against independent node enumeration,
+full-cell quantization, and the CPU/shader layer-selection constant.
 
 `WaterGpuGeometry` exports eight triangles with the production encoder. The
 native RT harness now uploads those 80-byte records and builds its AABBs from
@@ -67,7 +87,9 @@ diagonal checks. Ten flat-primitive checks pass for top/bottom directions,
 finite bounds, parallel rays, side faces, dry envelopes and animation-off
 behavior. Gradient, envelope, curvature and continuity properties also pass.
 
-The updated native RT executable compiles and all five SPIR-V modules pass
+The original packet integration measurements below predate the varying-height
+source-layer repair and remain historical evidence for that earlier packet.
+At that checkpoint the native RT executable compiled and all five SPIR-V modules passed
 Vulkan 1.2 validation. After the user exited Minecraft, the packet-backed GPU
 runs completed on the RTX 5060 Laptop/616.92 with 262144 rays per dispatch.
 Both coherent/shuffled layouts have zero hit/miss/distance failures in the

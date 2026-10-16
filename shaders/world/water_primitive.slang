@@ -3,7 +3,8 @@ import water;
 import water_field;
 import world_core;
 
-// RtWaterGeometry: five std430 float4 lanes, 80 bytes per water triangle. v0.w marks a free top;
+// RtWaterGeometry: five std430 float4 lanes, 80 bytes per water triangle. v0.w is 0 (flat face),
+// 1 (free top, v2.w constant source layer) or 2 (free top, v2.w missing fourth-corner height).
 // v1.w is its projected half (including either quad diagonal). All other faces stay exact flat triangles.
 public struct WaterPrimitive {
     public float4 v0;
@@ -24,6 +25,21 @@ public WaterPatch primitiveWaterPatch(WaterPrimitive primitive,float3 translatio
     return patch;
 }
 
+public WaterSourceDomain primitiveWaterSource(WaterPrimitive primitive,float3 translation) {
+    if(primitive.v0.w!=2)return constantWaterSource(worldPush.sharcGridOrigin.y+int(translation.y)+int(primitive.v2.w));
+    WaterSourceDomain source;
+    source.varying=true;source.layer=0;source.minimum=primitive.rectangle.xy+translation.xz;
+    source.extent=primitive.rectangle.zw;source.originY=worldPush.sharcGridOrigin.y;
+    float4 height=float4(primitive.v2.w);
+    float3 vertices[3]={primitive.v0.xyz,primitive.v1.xyz,primitive.v2.xyz};
+    for(int i=0;i<3;i++) {
+        uint index=(vertices[i].x>primitive.rectangle.x?2u:0u)|(vertices[i].z>primitive.rectangle.y?1u:0u);
+        height[index]=vertices[i].y;
+    }
+    source.height=height+translation.y;
+    return source;
+}
+
 public WaterWaves primitiveWaterWaves(WaterPrimitive primitive,float3 translation,float3 position,
         float hitT,bool animated,float currentT,float previousT) {
     float3 restNormal=normalize(cross(primitive.v1.xyz-primitive.v0.xyz,primitive.v2.xyz-primitive.v0.xyz));
@@ -31,11 +47,11 @@ public WaterWaves primitiveWaterWaves(WaterPrimitive primitive,float3 translatio
     if(primitive.v0.w!=0 && animated) {
         WaterPatch patch=primitiveWaterPatch(primitive,translation);
         float height,previousHeight;float2 gradient,previousGradient;
-        int sourceY=worldPush.sharcGridOrigin.y+int(translation.y)+int(primitive.v2.w);
+        WaterSourceDomain source=primitiveWaterSource(primitive,translation);
         WaterPatch current=worldPush.waterFieldAddr==0?patch:
-                canonicalWaterCell(patch,worldPush.waterFieldAddr,position.xz,sourceY);
+                canonicalWaterCell(patch,worldPush.waterFieldAddr,position.xz,source);
         WaterPatch previous=worldPush.waterPreviousFieldAddr==0?patch:
-                canonicalWaterCell(patch,worldPush.waterPreviousFieldAddr,position.xz,sourceY);
+                canonicalWaterCell(patch,worldPush.waterPreviousFieldAddr,position.xz,source);
         patchField(current,position.xz,currentT,0.0,height,gradient);
         bool sameDomain=all(current.minimum==previous.minimum)&&all(current.extent==previous.extent)
                 &&all(current.shore==previous.shore);
@@ -78,10 +94,10 @@ public float intersectWaterPrimitive(WaterPrimitive primitive,float3 translation
     work=0;exhausted=false;
     if(primitive.v0.w==0||!animated)return flatWaterTriangle(primitive,translation,ro,rd,rayMin,rayMax,bary);
     WaterPatch patch=primitiveWaterPatch(primitive,translation);
-    int sourceY=worldPush.sharcGridOrigin.y+int(translation.y)+int(primitive.v2.w);
+    WaterSourceDomain source=primitiveWaterSource(primitive,translation);
     float t=worldPush.waterFieldAddr==0
         ? intersectWaterPatch(patch,ro,rd,time,footprint,rayMin,rayMax,work,exhausted)
-        : intersectCanonicalWaterPatch(patch,sourceY,ro,rd,time,footprint,rayMin,rayMax,work,exhausted);
+        : intersectCanonicalWaterPatch(patch,source,ro,rd,time,footprint,rayMin,rayMax,work,exhausted);
     bary=float2(0);
     if(t>=0) {
         float2 a=primitive.v0.xz+translation.xz,e1=primitive.v1.xz-primitive.v0.xz,e2=primitive.v2.xz-primitive.v0.xz,p=(ro+rd*t).xz-a;

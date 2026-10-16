@@ -11,7 +11,7 @@ try {
     if(Test-Path -LiteralPath $taskOutput){throw 'Use a fresh output directory'}
     New-Item -ItemType Directory -Path $taskOutput | Out-Null
     $taskBuild=Join-Path $taskRoot 'build/shader-test'
-    foreach($taskImage in 'water-field-current.bin','water-field-previous.bin') {
+    foreach($taskImage in 'water-field-current.bin','water-field-previous.bin','water-field-full-cell.bin') {
         $taskImagePath=Join-Path $taskBuild $taskImage
         if(!(Test-Path -LiteralPath $taskImagePath)){throw 'Run Gradle test to export canonical field images first'}
         Copy-Item -LiteralPath $taskImagePath -Destination $taskOutput
@@ -31,6 +31,7 @@ try {
         Sources=$taskHashes;PrimitiveSha256=(Get-FileHash -LiteralPath (Join-Path $taskOutput 'water-layer-primitives.bin')).Hash;
         CurrentFieldSha256=(Get-FileHash -LiteralPath (Join-Path $taskOutput 'water-field-current.bin')).Hash;
         PreviousFieldSha256=(Get-FileHash -LiteralPath (Join-Path $taskOutput 'water-field-previous.bin')).Hash
+        FullCellFieldSha256=(Get-FileHash -LiteralPath (Join-Path $taskOutput 'water-field-full-cell.bin')).Hash
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $taskOutput 'run.json') -Encoding utf8
     $taskExpected=if($Diagnose){0}else{1}
     $taskSlang=Join-Path $taskRoot '.tools/slang-2026.18/bin/slangc.exe'
@@ -41,7 +42,7 @@ try {
     $taskTargets=@('water_layer_host');if(!$CpuOnly){$taskTargets+='water_layer_gpu'}
     & cmake --build $taskBuild --config Release --target @taskTargets
     if($LASTEXITCODE -ne 0){throw 'Layer native build failed'}
-    & (Join-Path $taskBuild 'Release/water_layer_host.exe') (Join-Path $taskOutput 'water-field-current.bin') (Join-Path $taskOutput 'water-field-previous.bin') (Join-Path $taskOutput 'water-layer-primitives.bin') (Join-Path $taskOutput 'host.csv') | Tee-Object -FilePath (Join-Path $taskOutput 'host.log')
+    & (Join-Path $taskBuild 'Release/water_layer_host.exe') (Join-Path $taskOutput 'water-field-current.bin') (Join-Path $taskOutput 'water-field-previous.bin') (Join-Path $taskOutput 'water-layer-primitives.bin') (Join-Path $taskOutput 'water-field-full-cell.bin') (Join-Path $taskOutput 'host.csv') | Tee-Object -FilePath (Join-Path $taskOutput 'host.log')
     if($LASTEXITCODE -ne 0){throw 'Layer CPU gate failed; this is not continuous-water acceptance'}
     $taskMaxGapDelta=$null
     if(!$CpuOnly) {

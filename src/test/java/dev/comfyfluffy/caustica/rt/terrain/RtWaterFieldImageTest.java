@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.*;
 final class RtWaterFieldImageTest {
     @Test void exportProductionImagesForIndependentShaderProbes() throws Exception {
         var current=new java.util.ArrayList<Tile>();var previous=new java.util.ArrayList<Tile>();
+        var fullCell=new java.util.ArrayList<Tile>();
         for(boolean border:new boolean[]{false,true}) {
             int baseX=border?1875000:0,baseZ=border?-1875000:0,range=border?1:2;
             for(int tx=baseX-range;tx<=baseX+range;tx++)for(int tz=baseZ-range;tz<=baseZ+range;tz++) {
@@ -19,7 +20,9 @@ final class RtWaterFieldImageTest {
                 }
                 boolean same=true;for(short code:codes)same&=code==codes[0];
                 current.add(new Tile(tx,175,tz,1,same?new short[]{codes[0]}:codes,known));
+                fullCell.add(new Tile(tx,176,tz,1,same?new short[]{codes[0]}:codes,known));
                 previous.add(new Tile(tx,175,tz,1,new short[]{0},new long[]{-1,-1,-1,-1}));
+                previous.add(new Tile(tx,176,tz,1,new short[]{0},new long[]{-1,-1,-1,-1}));
             }
         }
         var dir=java.nio.file.Path.of("build/shader-test");java.nio.file.Files.createDirectories(dir);
@@ -29,6 +32,10 @@ final class RtWaterFieldImageTest {
             bytes.asIntBuffer().put(words);
             java.nio.file.Files.write(dir.resolve(old?"water-field-previous.bin":"water-field-current.bin"),bytes.array());
         }
+        int[] fullWords=RtWaterFieldImage.pack(fullCell);
+        var fullBytes=java.nio.ByteBuffer.allocate(fullWords.length*4).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        fullBytes.asIntBuffer().put(fullWords);
+        java.nio.file.Files.write(dir.resolve("water-field-full-cell.bin"),fullBytes.array());
     }
     private static int word(int[] image,int x,int y,int z) {
         // Deliberately scan stored coordinates rather than using the writer's hash/probe algorithm.
