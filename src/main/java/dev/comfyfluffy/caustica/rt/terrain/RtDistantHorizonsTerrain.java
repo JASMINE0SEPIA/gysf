@@ -150,6 +150,15 @@ public final class RtDistantHorizonsTerrain {
         ctx.tickMemoryBudget();
         Minecraft minecraft = Minecraft.getInstance();
         Object newWorld = minecraft.level;
+        boolean providerAvailable=DistantHorizonsCompat.enabled()&&newWorld!=null;
+        long nextProviderEpoch=VoxyCompat.sceneEpoch();
+        if(providerAvailable&&(world!=newWorld||providerEpoch!=nextProviderEpoch)) {
+            // Invalidate old-model work before draining completions or restoring cached fine sources.
+            reset(ctx,false);
+            world=newWorld;
+            providerEpoch=nextProviderEpoch;
+            earliestBuildNanos=System.nanoTime()+1_000_000_000L;
+        } else if(!providerAvailable&&(current!=null||world!=null)) reset(ctx,true);
         if (DistantHorizonsCompat.enabled() && newWorld != null
                 && manualRefreshRequested.getAndSet(false)) {
             // Invalidate unpublished work before draining completions, so an old result cannot publish or
@@ -169,21 +178,7 @@ public final class RtDistantHorizonsTerrain {
         drainCompleted(ctx);
         serviceBuildSession(ctx);
 
-        if (!DistantHorizonsCompat.enabled() || newWorld == null) {
-            if (current != null || world != null) reset(ctx, true);
-            return;
-        }
-        long nextProviderEpoch=VoxyCompat.sceneEpoch();
-        if (world != newWorld || providerEpoch!=nextProviderEpoch) {
-            // The DH upload hook may already have captured VBOs for this new ClientLevel. Reset only GPU
-            // proxy/build state here; DistantHorizonsCompat scopes and clears old CPU captures by level
-            // identity, so deleting the map again would erase fresh data that DH may never re-upload.
-            reset(ctx, false);
-            world = newWorld;
-            providerEpoch=nextProviderEpoch;
-            // DH starts populating its repository after LevelRenderer. Avoid querying during world load.
-            earliestBuildNanos = System.nanoTime() + 1_000_000_000L;
-        }
+        if (!providerAvailable) return;
         pollMemoryBudget(ctx);
         var camera = minecraft.gameRenderer.mainCamera().position();
         int ax = Math.floorDiv((int) Math.floor(camera.x), ANCHOR_BLOCKS) * ANCHOR_BLOCKS;
@@ -216,7 +211,10 @@ public final class RtDistantHorizonsTerrain {
         boolean lodDataChanged = lodRevision != capturedLodRevision;
         boolean cameraCellChanged = ax != anchorX || az != anchorZ;
         boolean newlyRefinedNearby = false;
+        // Continuous provider uploads must not cancel every half-second before any new geometry
+        // publishes. Give each plan a minimum useful run and require real published build progress.
         boolean canCheckRefinement = buildSession != null && buildSession.transition != null
+                && buildSession.publishedBuiltCount>0 && now-buildSession.startedNanos>=2_000_000_000L
                 || buildSession == null && current != null && !cpuPending && !packPending && !pending;
         if (canCheckRefinement && now >= nextRefinementCheckNanos) {
             nextRefinementCheckNanos = now + QUALITY_POLL_NANOS;
@@ -1492,6 +1490,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private final class BuildSession {
+        final long startedNanos=System.nanoTime();
         final long epoch;
         final long revision;
         final ArrayDeque<PlannedBatch> remaining;

@@ -1535,6 +1535,10 @@ public final class RtComposite {
     }
 
     private void recordFrame(RtContext ctx, RtPipeline active, GpuTexture nativeColor) {
+        // Video settings/F3+A can recreate Voxy after the client tick. Refresh before reserving
+        // graphics use or recording any RT command: the cached scene may reference its dead atlas.
+        // Provider uploads can submit the host encoder, so this must stay outside the RT command buffer.
+        dev.comfyfluffy.caustica.compat.DistantHorizonsCompat.tickOptionalSources();
         long dstImage = vkImage(nativeColor);
         var encoder = (VulkanCommandEncoder) ((FrontendCommandEncoder) RenderSystem.getDevice().createCommandEncoder()).backend();
         RtGpuExecutor gpuExecutor = ctx.gpuExecutor();

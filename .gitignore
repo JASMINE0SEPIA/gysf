@@ -7,6 +7,7 @@ run/
 run-smoke/
 run-player-visual*/
 run-player-return*/
+run-crash-*/
 .tools/
 artifacts/
 out/

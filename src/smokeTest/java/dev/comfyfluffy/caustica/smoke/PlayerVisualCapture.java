@@ -44,6 +44,12 @@ final class PlayerVisualCapture {
         if(RtComposite.INSTANCE.hasFailed())throw new IllegalStateException("RT compositor failed");
         var terrain=dev.comfyfluffy.caustica.rt.terrain.RtTerrain.currentOrNull();
         if(terrain!=null)maxHeld=Math.max(maxHeld,terrain.retainedHandoffSectionCount());
+        if(ProviderRebuildCapture.ENABLED) {
+            // Keep the copied survival world's actual crash position and permissions.
+            if(worldTicks>=600)ProviderRebuildCapture.arm();
+            if(ProviderRebuildCapture.done())finish(client);
+            return;
+        }
         if(RETURN_ROUTE) {if(EXACT_CAMERAS)exactCameras(client);else returnRoute(client);return;}
         switch(worldTicks) {
             case 80 -> {
