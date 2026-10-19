@@ -307,33 +307,15 @@ final class RtWeatherCaptureTest {
         return count;
     }
 
-    /**
-     * A column the any-hit cutout will reject outright must not be built in the first place.
-     *
-     * <p>The shader keeps a weather texel only when {@code texel.a * coverage} clears {@code
-     * ENTITY_ALPHA_CUTOFF}. The densest texel in the rain sheet — a drop's core — is about alpha 1, so
-     * below that cutoff a column contributes no surviving sample at all while still consuming a slot of
-     * the shared particle budget, a BLAS entry and a ray test per pixel.
-     *
-     * <p>The threshold must track the shader constant. One 8-bit channel step is the point where the
-     * coverage byte rounds to zero, but everything from there up to the cutoff is equally invisible, so
-     * culling at the smaller bound would leave most of the dead columns in the budget.
-     */
+    /** Weather must stay on the fractional-coverage path, even below the entity cutoff. */
     @Test
-    void columnsBelowTheAnyHitCutoffAreNotEmitted() throws IOException {
+    void lowOpacityWeatherReachesStochasticCoverage() throws IOException {
         String src = Files.readString(source());
         String rahit = Files.readString(anyHitShader());
-
-        assertTrue(src.contains("MIN_VISIBLE_ALPHA = 0.1f"),
-                "the cull threshold must match the shader's alpha cutoff");
-        assertTrue(rahit.contains("ENTITY_ALPHA_CUTOFF = 0.1"),
-                "world.rahit's cutoff moved: MIN_VISIBLE_ALPHA has to follow it");
-        assertTrue(src.contains("alpha < MIN_VISIBLE_ALPHA"),
-                "columns below the cutoff must be skipped before they reach the BLAS");
-        assertFalse(src.contains("if (alpha <= 0.0f) {"),
-                "a plain > 0 test admits a whole storm's worth of columns that never draw");
+        assertTrue(src.contains("MIN_VISIBLE_ALPHA = 1.0f / 255.0f"));
+        assertTrue(rahit.contains("instanceKind == PARTICLE_BIT && (epr.flags & PRIM_WEATHER) != 0u"),
+                "weather must not silently fall back to opaque cutout after material refactors");
     }
-
     private static Path anyHitShader() {
         return repoRoot().resolve("shaders/world/world.rahit.slang");
     }
@@ -354,3 +336,4 @@ final class RtWeatherCaptureTest {
                 "weather capture must fail soft and log once rather than kill the RT frame");
     }
 }
+

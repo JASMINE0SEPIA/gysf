@@ -102,22 +102,8 @@ public final class RtWeatherCapture {
      */
     private static final float MIN_COLUMN_OPACITY = 0.35f;
 
-    /**
-     * Smallest column alpha worth emitting, mirroring {@code ENTITY_ALPHA_CUTOFF} in {@code
-     * world.rahit}.
-     *
-     * <p>The any-hit shader keeps a weather texel only when {@code texel.a * coverage} clears that
-     * cutoff. The rain sheet's densest texel — the core of a drop — has an alpha of about 1, so a column
-     * whose coverage is below the cutoff cannot produce a single surviving sample: not a faint sheet, an
-     * absent one. Emitting it anyway spends a slot of the shared particle budget, a BLAS entry and a
-     * ray test per pixel to draw nothing.
-     *
-     * <p>Kept deliberately in step with the shader constant rather than set to one 8-bit channel step
-     * ({@code 1/255}). That smaller bound is the point below which the coverage byte rounds to zero, but
-     * everything between it and the cutoff is equally invisible, so culling there would leave most of
-     * the dead columns in the budget.
-     */
-    private static final float MIN_VISIBLE_ALPHA = 0.1f;
+    /** Vertex alpha is quantized to eight bits; weather has no hard 0.1 cutout threshold. */
+    private static final float MIN_VISIBLE_ALPHA = 1.0f / 255.0f;
 
     /**
      * Vanilla's per-column billboard orientation table. Each (x, z) offset around the camera gets a fixed
@@ -330,15 +316,8 @@ public final class RtWeatherCapture {
             float relativeZ = (float) (column.z() + 0.5 - camPos.z);
             float distanceSq = (float) Mth.lengthSquared(relativeX, relativeZ);
             float alpha = Mth.lerp(Math.min(distanceSq / radiusSq, 1.0f), maxAlpha, 0.5f) * intensity;
-            // Drop columns the any-hit cutout will reject outright. Below MIN_VISIBLE_ALPHA not even a
-            // drop's core texel survives, so the sheet is built, budgeted and traced only to be
-            // discarded by every ray that touches it; skipping it here keeps the shared particle budget
-            // for columns that actually draw.
-            //
-            // This is a cost guard, not the visibility fix: the storm-opening flash came from the shader
-            // reading a zero coverage byte as fully opaque, which is fixed in world.rahit. Culling here
-            // would have hidden that flash for the first stretch of the ramp while leaving it intact
-            // everywhere else the byte lands on zero.
+            // Only skip alpha that cannot be represented in the captured vertex colour. Low-opacity
+            // weather must still reach stochastic coverage, including light rain and distance fades.
             if (alpha < MIN_VISIBLE_ALPHA) {
                 continue;
             }

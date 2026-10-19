@@ -16,6 +16,7 @@ import math;
 import voxy;
 import world_core;
 import water_primitive;
+import weather;
 
 [[vk::binding(2, 0)]] Sampler2D blockAlbedoAtlas;
 [[vk::binding(0, 1)]] Sampler2D entityAlbedoTex[];
@@ -192,7 +193,7 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
         Prim epr = ConstPtr<Prim>(g.primAddr)[pid];
         int texSlot = int(epr.tint.w + 0.5);
         MaterialHeader materialHeader = (MaterialHeader)0;
-        bool stochasticAlpha = false;
+        bool stochasticAlpha = instanceKind == PARTICLE_BIT && (epr.flags & PRIM_WEATHER) != 0u;
         if (instanceKind == ENTITY_BIT) {
             materialHeader = ConstPtr<MaterialHeader>(pc.materialTableAddr)[epr.materialId];
             stochasticAlpha = (materialHeader.features & MATERIAL_FEATURE_STOCHASTIC_ALPHA) != 0u;
@@ -280,7 +281,7 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
                 IgnoreHit();
             }
         } else if (stochasticAlpha) {
-            if (alphaDitherThreshold(salt) >= clamp(texel.a * primCoverage, 0.0, 1.0)) {
+            if (!weatherCoverageAccept(texel.a, primCoverage, alphaDitherThreshold(salt))) {
                 IgnoreHit();
             }
         } else if (texel.a * primCoverage < ENTITY_ALPHA_CUTOFF) {

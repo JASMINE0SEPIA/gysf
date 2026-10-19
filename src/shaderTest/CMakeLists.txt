@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(GysfShaderTests LANGUAGES CXX)
+add_executable(weather_transport weather_transport.cpp)
+target_compile_features(weather_transport PRIVATE cxx_std_17)
+target_include_directories(weather_transport PRIVATE "${CMAKE_BINARY_DIR}")
 add_executable(water_layer_host water_layer_host.cpp)
 target_compile_features(water_layer_host PRIVATE cxx_std_17)
 target_include_directories(water_layer_host PRIVATE "${CMAKE_BINARY_DIR}")
