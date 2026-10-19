@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync,[switch]$RequireWaterField,[switch]$RequireWaterGuides,[switch]$RequireGpuTimings,[switch]$RequireWaterBoundsCache,[switch]$RequireNearPressure,
+param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync,[switch]$RequireWaterField,[switch]$RequireWaterGuides,[switch]$RequireGpuTimings,[switch]$RequireWaterBoundsCache,[switch]$RequireNearPressure,[switch]$RequireLodReentry,
       [ValidateRange(1,64)][int]$GuideCaptureCount=4)
 $ErrorActionPreference='Stop'
 $content=Get-Content -LiteralPath $Path -Raw
@@ -8,7 +8,14 @@ $reports=Select-String -LiteralPath $Path -Pattern $validation
 if($reports) {
     throw "Vulkan validation reports in ${Path}: $($reports.Count). First: $($reports[0].Line)"
 }
-if($RequireNearPressure) {
+if($RequireLodReentry) {
+    $reentry=[regex]::Matches($content,'GYSF_LOD_REENTRY: PASS cold=(true|false) far=(\d+) resident=(\d+) publishedFar=(\d+) ingest=false frames=(\d+)')
+    if($reentry.Count -ne 1){throw "Missing unique disk-only LOD reentry PASS marker in $Path"}
+    $r=$reentry[0].Groups
+    if([int]$r[2].Value -lt 3 -or [int]$r[3].Value -lt 3 -or [int]$r[4].Value -lt 10 -or [long]$r[5].Value -lt 120) {
+        throw "Insufficient restored source/GPU coverage in $Path"
+    }
+} elseif($RequireNearPressure) {
     $pressure=[regex]::Matches($content,'GYSF_NEAR_PRESSURE: PASS initial=(\d+) minimum=(\d+) recovered=(\d+) instances=(\d+) -> (\d+) -> (\d+) retirementObserved=true ownershipChecks=(\d+)')
     if($pressure.Count -ne 1){throw "Missing unique near-pressure PASS marker in $Path"}
     $p=$pressure[0].Groups
