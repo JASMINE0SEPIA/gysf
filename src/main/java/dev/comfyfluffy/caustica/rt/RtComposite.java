@@ -1538,7 +1538,9 @@ public final class RtComposite {
         // Video settings/F3+A can recreate Voxy after the client tick. Refresh before reserving
         // graphics use or recording any RT command: the cached scene may reference its dead atlas.
         // Provider uploads can submit the host encoder, so this must stay outside the RT command buffer.
-        dev.comfyfluffy.caustica.compat.DistantHorizonsCompat.tickOptionalSources();
+        try (var stats = RtFrameStats.FRAME.stage("lod.poll")) {
+            dev.comfyfluffy.caustica.compat.DistantHorizonsCompat.tickOptionalSources();
+        }
         long dstImage = vkImage(nativeColor);
         var encoder = (VulkanCommandEncoder) ((FrontendCommandEncoder) RenderSystem.getDevice().createCommandEncoder()).backend();
         RtGpuExecutor gpuExecutor = ctx.gpuExecutor();
@@ -1610,7 +1612,9 @@ public final class RtComposite {
 
             boolean rrDone = false;
             // Optional coarse LOD proxy (Distant Horizons / Voxy). A no-op when neither mod is present.
-            RtDistantHorizonsTerrain.INSTANCE.frame(ctx, terrain.blockX, terrain.blockY, terrain.blockZ);
+            try (var stats = RtFrameStats.FRAME.stage("lod.frame")) {
+                RtDistantHorizonsTerrain.INSTANCE.frame(ctx, terrain.blockX, terrain.blockY, terrain.blockZ);
+            }
             // Select the next BDA ring slot; the generated WorldPushData serializer fills it once all
             // frame-derived values (including entity addresses and block-breaking entries) are known.
             pushSlot = (pushSlot + 1) % PUSH_RING;

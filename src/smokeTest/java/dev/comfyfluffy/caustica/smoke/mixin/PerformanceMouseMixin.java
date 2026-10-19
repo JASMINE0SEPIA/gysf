@@ -13,5 +13,5 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(MouseHandler.class)
 abstract class PerformanceMouseMixin {
     @Inject(method="turnPlayer",at=@At("HEAD"),cancellable=true)
-    private void gysf$ignoreBenchmarkMouse(double elapsed,CallbackInfo ci) {if(PerformanceCapture.locked() || WaterCameraCapture.locked() || WaterGuideCapture.locked() || LodReentryCapture.locked() || WeatherCapture.locked())ci.cancel();}
+    private void gysf$ignoreBenchmarkMouse(double elapsed,CallbackInfo ci) {if(dev.comfyfluffy.caustica.smoke.LodMotionCapture.enabled() || PerformanceCapture.locked() || WaterCameraCapture.locked() || WaterGuideCapture.locked() || LodReentryCapture.locked() || WeatherCapture.locked())ci.cancel();}
 }

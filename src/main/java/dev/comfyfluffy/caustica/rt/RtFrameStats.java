@@ -33,6 +33,7 @@ public final class RtFrameStats {
     // uninstrumented render work when a hitch's unaccounted time is large.
     public static final Profile FRAME = new Profile("frame",
             new String[] {
+                    "lod.poll", "lod.frame", "lod.retarget", "lod.publish",
                     "terrain.windowSync",
                     "terrain.dirtyDrain",
                     "terrain.drainCompletion",
@@ -315,7 +316,8 @@ public final class RtFrameStats {
             for (int i = 0; i < stageNames.length; i++) {
                 // entity.capture.* is a detailed subdivision nested inside the top-level entity.capture
                 // envelope. Report it, but do not double-count it when deriving unaccounted frame time.
-                if (!stageNames[i].startsWith("entity.capture.")) {
+                if (!stageNames[i].startsWith("entity.capture.")
+                        && !stageNames[i].equals("lod.retarget") && !stageNames[i].equals("lod.publish")) {
                     staged += stageNanos[i];
                 }
                 sb.append(' ').append(stageNames[i]).append('=').append(ms(stageNanos[i])).append("ms");

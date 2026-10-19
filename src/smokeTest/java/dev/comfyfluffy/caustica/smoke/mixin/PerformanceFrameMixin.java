@@ -15,9 +15,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(Minecraft.class)
 abstract class PerformanceFrameMixin {
     @Inject(method="runTick",at=@At("HEAD"))
-    private void gysf$lockBenchmarkCamera(boolean advanceGameTime,CallbackInfo ci) { PerformanceCapture.enforceCamera(); WaterCameraCapture.enforceCamera(); WaterGuideCapture.enforceCamera(); LodReentryCapture.enforceCamera(); WeatherCapture.enforceCamera(); }
+    private void gysf$lockBenchmarkCamera(boolean advanceGameTime,CallbackInfo ci) { dev.comfyfluffy.caustica.smoke.LodMotionCapture.camera(); PerformanceCapture.enforceCamera(); WaterCameraCapture.enforceCamera(); WaterGuideCapture.enforceCamera(); LodReentryCapture.enforceCamera(); WeatherCapture.enforceCamera(); }
     @Inject(method="handleKeybinds",at=@At("HEAD"),cancellable=true)
-    private void gysf$ignoreBenchmarkKeys(CallbackInfo ci) { if(PerformanceCapture.locked() || WaterCameraCapture.locked() || WaterGuideCapture.locked() || LodReentryCapture.locked() || WeatherCapture.locked())ci.cancel(); }
+    private void gysf$ignoreBenchmarkKeys(CallbackInfo ci) { if(dev.comfyfluffy.caustica.smoke.LodMotionCapture.enabled() || PerformanceCapture.locked() || WaterCameraCapture.locked() || WaterGuideCapture.locked() || LodReentryCapture.locked() || WeatherCapture.locked())ci.cancel(); }
     @Inject(method="runTick",at=@At("TAIL"))
-    private void gysf$sampleFrame(boolean advanceGameTime,CallbackInfo ci) { PerformanceCapture.frame(); }
+    private void gysf$sampleFrame(boolean advanceGameTime,CallbackInfo ci) { PerformanceCapture.frame(); dev.comfyfluffy.caustica.smoke.LodMotionCapture.frame(); }
 }

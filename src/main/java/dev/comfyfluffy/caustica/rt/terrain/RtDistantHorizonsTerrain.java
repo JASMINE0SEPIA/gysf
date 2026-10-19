@@ -932,6 +932,14 @@ public final class RtDistantHorizonsTerrain {
     private void queueAtomicBuild(RtContext ctx, List<PlannedBatch> plan,
                                   RtMaterialRegistry.Snapshot materials,
                                   long taskEpoch, long revision) {
+        try (var stats = dev.comfyfluffy.caustica.rt.RtFrameStats.FRAME.stage("lod.retarget")) {
+            queueAtomicBuildProfiled(ctx, plan, materials, taskEpoch, revision);
+        }
+    }
+
+    private void queueAtomicBuildProfiled(RtContext ctx, List<PlannedBatch> plan,
+                                  RtMaterialRegistry.Snapshot materials,
+                                  long taskEpoch, long revision) {
         if (taskEpoch != epoch) return;
         if (buildWindow.count() != 0) {
             requestRetry();
@@ -1376,6 +1384,12 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private void publishBuildSession(RtContext ctx, boolean finished) {
+        try (var stats = dev.comfyfluffy.caustica.rt.RtFrameStats.FRAME.stage("lod.publish")) {
+            publishBuildSessionProfiled(ctx, finished);
+        }
+    }
+
+    private void publishBuildSessionProfiled(RtContext ctx, boolean finished) {
         BuildSession session = buildSession;
         RtBuffer table = null;
         try {
