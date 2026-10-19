@@ -11,14 +11,18 @@ import net.minecraft.client.gui.screens.TitleScreen;
 
 /** Fixed-camera persistence replay on a complete physical Greenfield copy. */
 public final class LodReentryCapture {
+    private static volatile int cameraTicks;
+    private static final boolean TURN = Boolean.getBoolean("gysf.smoke.reentry.turn");
     public static boolean locked() { return Boolean.getBoolean("gysf.smoke.reentry"); }
     public static void enforceCamera() {
         if (!locked()) return;
         var player = Minecraft.getInstance().player;
         if (player == null) return;
-        player.setYRot(35); player.yRotO = 35;
+        float yaw = TURN && cameraTicks >= 200 && cameraTicks < 600
+                ? 35 + 90 * (((cameraTicks - 200) / 40 + 1) % 4) : 35;
+        player.setYRot(yaw); player.yRotO = yaw;
         player.setXRot(15); player.xRotO = 15;
-        player.setYHeadRot(35); player.yHeadRotO = 35;
+        player.setYHeadRot(yaw); player.yHeadRotO = yaw;
     }
     private static final boolean BASELINE = Boolean.getBoolean("gysf.smoke.reentry.baseline");
     private static final boolean COLD = Boolean.getBoolean("gysf.smoke.reentry.cold");
@@ -27,6 +31,8 @@ public final class LodReentryCapture {
     private int ticks, worldTicks, phase, exitTicks, stableTicks;
     private boolean opened, finished;
     private long beforeEpoch;
+    private long worldStartedNanos;
+    private int residentBeforeTurn;
     private final Map<String, Object> results = new LinkedHashMap<>();
 
     void tick(Minecraft client) {
@@ -47,11 +53,21 @@ public final class LodReentryCapture {
             client.createWorldOpenFlows().openWorld("gysf-reentry", () -> {
                 throw new IllegalStateException("LOD replay cancelled");
             });
-            worldTicks = 0; stableTicks = 0;
+            worldTicks = 0; stableTicks = 0; cameraTicks = 0; worldStartedNanos = 0;
         }
         if (client.level == null || client.player == null) return;
         if (RtComposite.INSTANCE.hasFailed()) throw new IllegalStateException("RT failed during LOD reentry");
         ++worldTicks;
+        cameraTicks = worldTicks;
+        if (worldStartedNanos == 0) worldStartedNanos = System.nanoTime();
+        if (TURN && worldTicks == 200) residentBeforeTurn = RtDistantHorizonsTerrain.INSTANCE.residentSectionCount();
+        if (TURN && worldTicks == 600 && !BASELINE) {
+            var stats = RtDistantHorizonsTerrain.INSTANCE.streamingStats();
+            if (stats.get("viewCancellations") != 0 || stats.get("retargets") < 2
+                    || RtDistantHorizonsTerrain.INSTANCE.residentSectionCount() <= residentBeforeTurn)
+                throw new IllegalStateException("Camera turns cancelled or starved LOD progress: " + stats);
+            System.out.println("GYSF_LOD_TURN: PASS " + stats);
+        }
         if (worldTicks == 60) {
             client.player.connection.sendCommand("gamemode spectator");
             client.player.connection.sendCommand("time set 6000");
@@ -136,6 +152,8 @@ public final class LodReentryCapture {
         values.put("pendingBuilds", RtDistantHorizonsTerrain.INSTANCE.hasPendingBuilds());
         values.put("temporaryDistance", RtDistantHorizonsTerrain.INSTANCE.memoryDistanceLimit());
         values.put("ingest", VoxyCompat.ingestEnabled());
+        values.put("elapsedSeconds", (System.nanoTime() - worldStartedNanos) / 1e9);
+        values.put("streaming", RtDistantHorizonsTerrain.INSTANCE.streamingStats());
         try {
             values.put("backend", Class.forName("me.cortex.voxy.client.core.backend.VoxyGraphicsBackend")
                     .getMethod("statusLine").invoke(null));

@@ -121,6 +121,9 @@ public final class RtDistantHorizonsTerrain {
     private int activeTasks;
     private boolean pending;
     private boolean cpuPending;
+    /** Latest selection waits for the current bounded batch, never invalidating its world epoch. */
+    private CpuCompleted readyPlan;
+    private long livePlanRetargets, viewPlanCancellations;
     private boolean packPending;
     private boolean bootstrapComplete;
     private final AtomicBoolean manualRefreshRequested = new AtomicBoolean();
@@ -231,12 +234,15 @@ public final class RtDistantHorizonsTerrain {
                 }
             }
         }
-        if (newlyRefinedNearby) nextRefresh=0L;
-        if ((newlyRefinedNearby || cameraCellChanged && anchorX != Integer.MIN_VALUE)
+        boolean voxySource = VoxyCompat.sceneEpoch() != Long.MIN_VALUE;
+        boolean liveVoxyPlan = buildSession != null && buildSession.transition != null;
+        if (newlyRefinedNearby && !liveVoxyPlan) nextRefresh=0L;
+        if (!voxySource && (newlyRefinedNearby || cameraCellChanged && anchorX != Integer.MIN_VALUE)
                 && (buildSession != null || cpuPending || packPending || pending)) {
             // A return trip must not wait behind a minutes-long plan ordered around the old camera.
             // Published sources/index remain live; only unpublished work is cancelled and reprioritized.
             epoch++;
+            viewPlanCancellations++;
             abortBuildSession();
             cpuPending = false;
             anchorX = anchorZ = Integer.MIN_VALUE;
@@ -252,18 +258,20 @@ public final class RtDistantHorizonsTerrain {
 
         // Never withdraw the published RT proxy while a replacement is prepared. DH uploads can arrive in
         // bursts for many seconds; wait for a quiet window, then rebuild only changed source meshes.
+        boolean retargetVoxy = liveVoxyPlan && now >= nextRefresh
+                && (newlyRefinedNearby || cameraCellChanged || lodDataChanged);
         boolean replacementBusy = buildSession != null || packPending;
-        if (!pending && !cpuPending && !replacementBusy && now >= earliestBuildNanos
+        if (!cpuPending && readyPlan == null && (retargetVoxy || !pending && !replacementBusy) && now >= earliestBuildNanos
                 // Do not freeze a CPU bootstrap parent into a long-lived RT fallback. Once the provider
                 // has the requested children, they can publish independently as small source volumes.
                 // Existing published geometry remains owned throughout this brief admission delay.
                 && !VoxyCompat.refinementPending()
                 && RtMaterialRegistry.INSTANCE.isReady() && refreshAdmissionAllowed(ctx)
-                && (current == null || cameraCellChanged || refreshUploadedLods)) {
+                && (retargetVoxy || current == null || cameraCellChanged || refreshUploadedLods)) {
             anchorX = ax;
             anchorZ = az;
             capturedLodRevision = lodRevision;
-            nextRefresh = now + refreshDelayNanos(now);
+            nextRefresh = now + (liveVoxyPlan ? QUALITY_REFRESH_NANOS : refreshDelayNanos(now));
             // Match the shader hand-off: DH starts one chunk closer than the old +CHUNK_BLOCKS seam.
             int vanillaRadius = minecraft.options.renderDistance().get() * CHUNK_BLOCKS
                     + VANILLA_SEAM_GUARD_BLOCKS;
@@ -414,6 +422,12 @@ public final class RtDistantHorizonsTerrain {
         return bootstrapComplete;
     }
 
+    /** Development replay counters; geometry remains owned by the render thread. */
+    public Map<String, Long> streamingStats() {
+        return Map.of("retargets", livePlanRetargets, "viewCancellations", viewPlanCancellations,
+                "epoch", epoch, "remaining", buildSession == null ? 0L : (long) buildSession.remaining.size());
+    }
+
     private void startCpuBuild(int originX, int originY, int originZ, int proxyRadius, long taskEpoch,
                                long revision, Proxy base, RtMaterialRegistry.Snapshot materials,
                                DistantHorizonsCompat.LodQuality quality) {
@@ -481,7 +495,9 @@ public final class RtDistantHorizonsTerrain {
             if (distance > proxyRadius + mesh.width()) continue;
             selectedMeshes++;
 
-            SourceState oldSource = base == null ? null : base.sources.get(mesh.key());
+            // Voxy keeps publishing while this plan is assembled. Resolve native geometry reuse on its
+            // owning render thread, after the previous in-flight batch completes, never from a CPU snapshot.
+            SourceState oldSource = textured || base == null ? null : base.sources.get(mesh.key());
             if (oldSource != null && oldSource.version == mesh.version()) {
                 reusedMeshes++;
                 reusedBatches += oldSource.entries.size();
@@ -897,7 +913,7 @@ public final class RtDistantHorizonsTerrain {
             if (done.failure != null) {
                 CausticaMod.LOGGER.warn("Distant Horizons terrain buffer read failed", done.failure);
             } else if (done.plan != null && !done.plan.isEmpty()) {
-                queueAtomicBuild(ctx, done.plan, done.materials, done.epoch, done.revision);
+                readyPlan = done;
             }
         }
     }
@@ -906,11 +922,33 @@ public final class RtDistantHorizonsTerrain {
                                   RtMaterialRegistry.Snapshot materials,
                                   long taskEpoch, long revision) {
         if (taskEpoch != epoch) return;
-        if (buildSession != null || pending || packPending) {
+        if (pending || packPending) {
             requestRetry();
             return;
         }
-        buildSession = new BuildSession(taskEpoch, revision, new ArrayDeque<>(plan), materials, current);
+        BuildSession previousSession = buildSession;
+        boolean voxy = plan.stream().allMatch(batch -> batch.volume != null);
+        if (previousSession != null && (!voxy || previousSession.transition == null)) {
+            requestRetry();
+            return;
+        }
+        if (voxy) plan = reuseCompletedBatches(plan, previousSession);
+        BuildSession replacement = new BuildSession(taskEpoch, revision, new ArrayDeque<>(plan), materials, current);
+        if (previousSession != null) {
+            replacement.lastBuild = previousSession.lastBuild;
+            Set<RtSectionTable.SectionGeom> reused = Collections.newSetFromMap(new IdentityHashMap<>());
+            for (PlannedBatch batch : plan) if (batch.reused != null) reused.add(batch.reused.geom);
+            for (var geom : previousSession.owned) {
+                if (reused.contains(geom)) replacement.owned.add(geom);
+                else geom.destroy(); // Unpublished, completed geometry no longer requested by this view.
+            }
+            previousSession.owned.clear();
+            livePlanRetargets++;
+            CausticaMod.LOGGER.info("Voxy RT retargeted remaining work without cancelling its world epoch: {} batches reused",
+                    replacement.reusedCount);
+        }
+        buildSession = replacement;
+        if (voxy) nextRefresh = System.nanoTime() + QUALITY_REFRESH_NANOS;
         if(buildSession.restoredFineCount>0)CausticaMod.LOGGER.info(
                 "Voxy restored cached fine detail: {} complete sources, {} MiB before rebuilding",
                 buildSession.restoredFineCount,buildSession.restoredFineBytes>>20);
@@ -921,6 +959,26 @@ public final class RtDistantHorizonsTerrain {
         // Their native bytes stay charged until the graphics retirement callback actually destroys them.
         if(buildSession.transition!=null && buildSession.coverageChanged) publishBuildSession(ctx,false);
         serviceBuildSession(ctx);
+    }
+
+    private List<PlannedBatch> reuseCompletedBatches(List<PlannedBatch> plan, BuildSession session) {
+        Map<Long, GeomEntry> available = new HashMap<>();
+        if (current != null) for (var entry : current.entries) available.put(entry.batchKey, entry);
+        if (session != null) {
+            available.putAll(session.workingEntries);
+            session.stagedEntries.forEach((key, entries) -> {
+                SourceProgress progress = session.sourceProgress.get(key);
+                if (progress != null && progress.ready)
+                    for (var entry : entries) available.put(entry.batchKey, entry);
+            });
+        }
+        List<PlannedBatch> result = new ArrayList<>(plan.size());
+        for (var batch : plan) {
+            var entry = available.get(batch.batchKey);
+            result.add(entry != null && entry.sourceKey == batch.sourceKey && entry.sourceVersion == batch.sourceVersion
+                    ? PlannedBatch.reuse(entry) : batch);
+        }
+        return result;
     }
 
     private static long sourceBytes(List<GeomEntry> entries) {
@@ -966,8 +1024,15 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private void serviceBuildSession(RtContext ctx) {
+        if (pending || packPending) return;
+        if (readyPlan != null) {
+            CpuCompleted next = readyPlan;
+            readyPlan = null;
+            if (next.epoch == epoch) queueAtomicBuild(ctx, next.plan, next.materials, next.epoch, next.revision);
+            return;
+        }
         BuildSession session = buildSession;
-        if (session == null || pending || packPending) return;
+        if (session == null || cpuPending && session.transition != null) return;
 
         while (!session.remaining.isEmpty()) {
             PlannedBatch next = session.remaining.removeFirst();
@@ -1372,6 +1437,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private void abortBuildSession() {
+        readyPlan = null;
         BuildSession session = buildSession;
         buildSession = null;
         if (session != null) {
