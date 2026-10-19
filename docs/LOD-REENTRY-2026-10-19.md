@@ -55,4 +55,12 @@ Reconstruction takes about 225 seconds with Vulkan validation enabled, while
 intermediate checkpoints steadily increase coverage. This timing describes this
 fixture only. The Vulkan/NGX gate passes; native LOD allocations return to zero
 (1,418,030,608-byte peak, zero deferrals). A second cold replay clears weather on
-the copy and waits another 100 idle ticks for a readable final visual check.
+the copy and waits another 100 idle ticks for a readable final visual check. It
+also passes with the same 2,412 batches and 3,151 sampled far sections; the saved
+screenshots show the previously missing streets and buildings restored beyond
+the six-chunk near distance. Vulkan validation remains clean and native LOD
+allocations return to zero (1,418,030,896-byte peak, zero deferrals).
+
+The final Vulkan.15 package was deployed with hash verification and a Vulkan.14
+backup. All 146 protected configuration/save/cache files and the other 16 mod
+files retain their pre-test hashes. gysf 0.7.4 and Sodium remain unchanged.
