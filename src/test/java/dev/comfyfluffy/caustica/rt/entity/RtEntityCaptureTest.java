@@ -41,6 +41,24 @@ final class RtEntityCaptureTest {
         assertArrayEquals(new int[] {0, 0}, capture.packGeometry().bucketTris());
     }
 
+    @Test
+    void weatherLightSurvivesPackingWithoutAliasingArmourGlint() {
+        RtEntityCapture capture = new RtEntityCapture();
+        int light = (14 << 4) | (12 << 20);
+        capture.currentPrimFlags = RtEntityCapture.PRIM_FLAG_WEATHER;
+        capture.currentWeatherLightCoords = light;
+        addQuad(capture, RtAccel.ENTITY_BUCKET_ANY_HIT, 0);
+        var packed = capture.packGeometry().primitives();
+        assertEquals(light, Float.floatToRawIntBits(packed.getFloat(11)));
+        assertEquals(light, Float.floatToRawIntBits(packed.getFloat(23)));
+        capture.reset();
+        assertEquals(0, capture.currentWeatherLightCoords);
+        capture.currentPrimFlags = RtEntityCapture.PRIM_FLAG_GLINT;
+        capture.currentGlintArmorSlot = 42;
+        addQuad(capture, RtAccel.ENTITY_BUCKET_ANY_HIT, 0);
+        assertEquals(42, Float.floatToRawIntBits(capture.packGeometry().primitives().getFloat(11)));
+    }
+
     private static void addQuad(RtEntityCapture capture, int bucket, int materialId) {
         capture.currentAlphaBucket = bucket;
         capture.currentMaterialId = materialId;

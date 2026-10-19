@@ -32,6 +32,7 @@ import lighting;
 import clouds;
 import fog;
 import sharc;
+import weather;
 
 // First-bounce lobe decomposition for NRD (REBLUR_DIFFUSE_SPECULAR): alongside the combined
 // radiance L, accumulates per-lobe radiance (outLdiff/outLspec) and the first-bounce hit distance
@@ -380,26 +381,17 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex,
             }
             float3 albedo = payload.albedo;
 
-            // Rain/snow sheets: deliberately UNLIT. The full particle light path below (sun NEE with a
-            // shadow ray, RIS block lights, a diffuse bounce off the sheet) read as blotchy, blown-out
-            // streaks on something the eye expects to be a soft translucent veil — vanilla's own weather
-            // pass is effectively unlit too (a lightmap-brightened blend, no per-drop lighting). So the
-            // sheet contributes its texel colour scaled only by the day/night curve, and the path ENDS
-            // here: rays that passed the stochastic cutout already carried the see-through share, and
-            // bouncing off rain would add the scene's light right back into it — the exact thing being
-            // removed. The sheets stay real geometry in the BLAS: terrain still occludes them, the
-            // heightmap clip still holds, they just stop participating in lighting.
+            // Vanilla sky/block light controls the rain without shading the sheet as a diffuse solid.
+            // The shared RT sky ambient already follows day/night and storm attenuation. Coverage
+            // transmits the background; this branch supplies only the accepted weather sample.
             if ((payload.flags & PAYLOAD_WEATHER) != 0u) {
-                // Calibrated against feedback from in-game: the first pass (0.35..1.0) read inverted —
-                // far too bright against the near-black night sky and too dark against daylight. The
-                // sheet now nearly vanishes at night and sits well above the texture's own mid-grey in
-                // the day, so streaks read as a light veil over the bright sky.
-                float weatherSheet = lerp(0.12, 1.9, worldPush.sunDir.w);
-                L += throughput * albedo * weatherSheet;
+                float3 weatherLight = weatherIllumination(float2(payload.f0.xy), cloudSkyAmbient(worldPush),
+                                                         worldPush.lightScales.x);
+                L += throughput * albedo * weatherLight;
                 if (channel == 2) {
-                    Lspec += throughput * albedo * weatherSheet;
+                    Lspec += throughput * albedo * weatherLight;
                 } else {
-                    Ldiff += throughput * albedo * weatherSheet;
+                    Ldiff += throughput * albedo * weatherLight;
                 }
                 break;
             }

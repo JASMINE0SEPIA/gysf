@@ -659,10 +659,12 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
         payload.f0 = half3(0.0h, 0.0h, 0.0h);
         payloadSetPacked(payload, MATERIAL_PARTICLE, 1.0, 0.0, 0.0, 0.0,
                 1.0, 0.0, EMISSION_SOURCE_NONE);
-        // Rain/snow sheets are tagged at capture (RtWeatherCapture) and shaded unlit in raygen — the
-        // path tracer's light response was visibly breaking them (see PRIM_WEATHER).
+        // Weather carries vanilla packed light in aux1. F0 is unused for the diffuse-only particle
+        // material, so its first two lanes carry normalized sky/block levels to raygen.
         if ((pr.flags & PRIM_WEATHER) != 0u) {
             payload.flags |= PAYLOAD_WEATHER;
+            payload.f0 = half3(float3(float((pr.aux1 >> 20u) & 15u) / 15.0,
+                                     float((pr.aux1 >> 4u) & 15u) / 15.0, 0.0));
         }
         return;
     }

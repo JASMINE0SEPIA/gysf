@@ -62,11 +62,13 @@ public final class RtEntityCapture implements VertexConsumer {
     int currentPortalFlags;
     // Extra per-prim flags for the current submission, OR-ed into the same flags lane. Two consumers
     // today: the weather capture (PRIM_FLAG_WEATHER: rain/snow sheets must reach raygen tagged so they
-    // can be shaded UNLIT — the path tracer's light response was visibly breaking them) and the glint
+    // use sky/block lighting without diffuse surface bounces) and the glint
     // paths (PRIM_FLAG_GLINT: enchantment/foil overlays are special-captured like the portal surfaces,
     // so world.rchit shades them with an animated self-lit branch). Particles share the flags lane but
     // never carry portal tags, so these bits are unambiguous there.
     int currentPrimFlags;
+    // Vanilla packed sky/block light for weather only; shares aux1 with entity-only armour glint.
+    int currentWeatherLightCoords;
     /** Mirrors world_common.slang's PRIM_WEATHER. */
     static final int PRIM_FLAG_WEATHER = 16;
     /** Mirrors world_common.slang's PRIM_GLINT (entity-only bit; terrain never sets it). */
@@ -116,6 +118,7 @@ public final class RtEntityCapture implements VertexConsumer {
         currentOrder = 0;
         currentPortalFlags = 0;
         currentPrimFlags = 0;
+        currentWeatherLightCoords = 0;
         currentGlintArmorSlot = 0;
         uvRemap = false;
     }
@@ -173,6 +176,7 @@ public final class RtEntityCapture implements VertexConsumer {
         target.currentOrder = currentOrder;
         target.currentPortalFlags = currentPortalFlags;
         target.currentPrimFlags = currentPrimFlags;
+        target.currentWeatherLightCoords = currentWeatherLightCoords;
         target.currentGlintArmorSlot = currentGlintArmorSlot;
         target.uvRemap = uvRemap;
         target.uvU0 = uvU0;
@@ -447,12 +451,13 @@ public final class RtEntityCapture implements VertexConsumer {
             prim.add(tb);
             prim.add((float) currentTexSlot); // tint.w = bindless texture slot
             prim.add(Float.intBitsToFloat(currentMaterialId));
-            // flags lane: portal tags (terrain shading) OR the weather bit (unlit rain/snow in raygen).
+            // Flags distinguish portal surfaces, weather lighting and armour glint.
             prim.add(Float.intBitsToFloat(currentPortalFlags | currentPrimFlags));
             prim.add(opacity); // aux0 = primitive coverage multiplier (read asfloat(aux0) in shaders)
             // aux1 = armour texture slot for the glint gate (int bits; 0 = none/unknown). Only glint
-            // submissions carry a non-zero value; every other path leaves it 0 and shaders ignore it.
-            prim.add(Float.intBitsToFloat(currentGlintArmorSlot));
+            // submissions carry it; weather uses the same lane for packed vanilla sky/block light.
+            prim.add(Float.intBitsToFloat((currentPrimFlags & PRIM_FLAG_WEATHER) != 0
+                    ? currentWeatherLightCoords : currentGlintArmorSlot));
             alphaBuckets.add(currentAlphaBucket);
         }
     }

@@ -8,5 +8,5 @@ int main() {
     ComputeThreadVaryingInput input{};
     weatherTransportProbe_Thread(&input, nullptr, &params);
     std::cout << "WEATHER_TRANSPORT cases=" << output[1] << " failures=" << output[0] << '\n';
-    return output[0] == 0 && output[1] == 303 ? 0 : 1;
+    return output[0] == 0 && output[1] == 323 ? 0 : 1;
 }

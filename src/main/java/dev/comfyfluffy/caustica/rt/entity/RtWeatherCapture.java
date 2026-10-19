@@ -182,10 +182,8 @@ public final class RtWeatherCapture {
             return 0;
         }
         int captured = 0;
-        // Tag every emitted sheet so raygen shades it UNLIT (see PRIM_WEATHER). The path tracer's
-        // direct/indirect light read as blotchy, blown-out streaks on the rain; the sheets stay real
-        // geometry (terrain occlusion and the heightmap clip are kept) but stop participating in
-        // lighting, the way vanilla's own weather pass is effectively unlit.
+        // Weather uses vanilla sky/block light and the current RT environment, without treating a
+        // rain sheet as a diffuse solid surface. Terrain occlusion and the heightmap clip are kept.
         capture.currentPrimFlags = RtEntityCapture.PRIM_FLAG_WEATHER;
         capture.currentGlintArmorSlot = 0; // weather never carries a glint armour context
         try {
@@ -202,6 +200,7 @@ public final class RtWeatherCapture {
             return captured;
         } finally {
             capture.currentPrimFlags = 0;
+            capture.currentWeatherLightCoords = 0;
         }
         return captured;
     }
@@ -341,6 +340,7 @@ public final class RtWeatherCapture {
             // columns a few blocks further out were shaded progressively darker, and the boundary
             // between two adjacent alpha steps read as a visible seam across the sheet.
             int color = ARGB.white(alpha);
+            capture.currentWeatherLightCoords = column.lightCoords();
 
             // The orientation table is indexed by the column's offset from the camera, biased to the
             // table centre. Columns beyond the table (a radius option larger than 16) would index out of

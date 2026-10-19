@@ -282,10 +282,8 @@ public static const uint TERRAIN_PRIM_PORTAL_NETHER = 2u;
 public static const uint TERRAIN_PRIM_PORTAL_END = 4u;
 // Prim.flags (entity prims): a vanilla rain/snow sheet captured by RtWeatherCapture. Shares the flags
 // lane the portal tags use on terrain — particles never carry portal tags, so the bit is unambiguous.
-// Raygen shades these sheets UNLIT (see PAYLOAD_WEATHER): the path tracer's direct/indirect light was
-// visibly breaking the rain (blotchy over-lit streaks), and vanilla's own weather pass is essentially
-// unlit too. The sheets stay real BLAS geometry, so terrain still occludes them and the heightmap
-// clip still works — only the lighting response is removed.
+// Raygen uses vanilla sky/block light with the shared RT environment. The sheets retain terrain
+// occlusion and heightmap clipping, without introducing diffuse solid-surface bounces.
 public static const uint PRIM_WEATHER = 16u;
 // Prim.flags (entity prims): an enchantment/foil glint overlay captured by RtEntityCollector. Tagging
 // lets world.rchit shade it with a dedicated branch — an animated, self-lit shimmer (the same special
@@ -335,9 +333,8 @@ public struct Payload {
 };
 
 public static const uint PAYLOAD_SHOW_CELESTIAL = 4u;
-// Rain/snow sheet (Prim.flags carried through by world.rchit): raygen shades it unlit and ends the
-// path there — no NEE, no shadow ray, no RIS, no diffuse continuation — because the path tracer's
-// light response was visibly breaking the weather streaks. See PRIM_WEATHER.
+// Rain/snow sheet: sky/block light carried in particle F0, shaded against the current environment.
+// No diffuse solid-surface continuation, shadow casting or reflections from the billboard itself.
 public static const uint PAYLOAD_WEATHER = 512u;
 // End portal night-sky surface (set by world.rchit on both the terrain and the entity/block-entity
 // portal branches): raygen shades it fully UNLIT — only its own emission is added, then the path
