@@ -119,13 +119,16 @@ public final class RtDistantHorizonsTerrain {
     private DistantHorizonsCompat.LodQuality lodQuality =
             new DistantHorizonsCompat.LodQuality(0L, 16, 2, "UNKNOWN", "UNKNOWN");
     private int activeTasks;
-    private boolean pending;
+    private int gpuPending;
     private boolean cpuPending;
     /** Latest selection waits for the current bounded batch, never invalidating its world epoch. */
     private CpuCompleted readyPlan;
     private long livePlanRetargets, viewPlanCancellations;
     private long residentCacheReuses;
-    private boolean packPending;
+    private int packingBatches;
+    private final LodBuildWindow buildWindow = new LodBuildWindow(
+            Math.clamp(Integer.getInteger("gysf.rt.lodBuildInFlight",16),1,32),
+            Math.clamp(Integer.getInteger("gysf.rt.lodBuildMiB",64),16,256)*RtLodMemory.MIB);
     private boolean bootstrapComplete;
     private final AtomicBoolean manualRefreshRequested = new AtomicBoolean();
     private boolean forceSourceRebuild;
@@ -193,7 +196,7 @@ public final class RtDistantHorizonsTerrain {
             DistantHorizonsCompat.LodQuality updatedQuality = DistantHorizonsCompat.lodQuality();
             if (updatedQuality.signature() != lodQuality.signature()) {
                 if (lodQuality.signature() != 0L
-                        && (cpuPending || packPending || pending || buildSession != null)) {
+                        && (cpuPending || buildWindow.count() != 0 || buildSession != null)) {
                     // Do not finish a minutes-long plan made for the previous DH quality. Keep the currently
                     // published proxy, cancel only unpublished work, and re-plan from the new active LOD tree.
                     epoch++;
@@ -219,7 +222,7 @@ public final class RtDistantHorizonsTerrain {
         // publishes. Give each plan a minimum useful run and require real published build progress.
         boolean canCheckRefinement = buildSession != null && buildSession.transition != null
                 && buildSession.publishedBuiltCount>0 && now-buildSession.startedNanos>=2_000_000_000L
-                || buildSession == null && current != null && !cpuPending && !packPending && !pending;
+                || buildSession == null && current != null && !cpuPending && buildWindow.count() == 0;
         if (canCheckRefinement && now >= nextRefinementCheckNanos) {
             nextRefinementCheckNanos = now + QUALITY_POLL_NANOS;
             Set<Long> plannedSources=buildSession!=null ? buildSession.finalSourceKeys : current.volumes.keySet();
@@ -239,7 +242,7 @@ public final class RtDistantHorizonsTerrain {
         boolean liveVoxyPlan = buildSession != null && buildSession.transition != null;
         if (newlyRefinedNearby && !liveVoxyPlan) nextRefresh=0L;
         if (!voxySource && (newlyRefinedNearby || cameraCellChanged && anchorX != Integer.MIN_VALUE)
-                && (buildSession != null || cpuPending || packPending || pending)) {
+                && (buildSession != null || cpuPending || buildWindow.count() != 0)) {
             // A return trip must not wait behind a minutes-long plan ordered around the old camera.
             // Published sources/index remain live; only unpublished work is cancelled and reprioritized.
             epoch++;
@@ -261,8 +264,8 @@ public final class RtDistantHorizonsTerrain {
         // bursts for many seconds; wait for a quiet window, then rebuild only changed source meshes.
         boolean retargetVoxy = liveVoxyPlan && now >= nextRefresh
                 && (newlyRefinedNearby || cameraCellChanged || lodDataChanged);
-        boolean replacementBusy = buildSession != null || packPending;
-        if (!cpuPending && readyPlan == null && (retargetVoxy || !pending && !replacementBusy) && now >= earliestBuildNanos
+        boolean replacementBusy = buildSession != null || buildWindow.count() != 0;
+        if (!cpuPending && readyPlan == null && (retargetVoxy || !replacementBusy) && now >= earliestBuildNanos
                 // Do not freeze a CPU bootstrap parent into a long-lived RT fallback. Once the provider
                 // has the requested children, they can publish independently as small source volumes.
                 // Existing published geometry remains owned throughout this brief admission delay.
@@ -348,7 +351,7 @@ public final class RtDistantHorizonsTerrain {
     /** Render-thread view; pending replacements have not incurred their full resident memory yet. */
     public boolean hasPendingBuilds() {
         synchronized(activeLock) {
-            return activeTasks!=0 || cpuPending || packPending || pending || buildSession!=null
+            return activeTasks!=0 || cpuPending || buildWindow.count()!=0 || readyPlan!=null || buildSession!=null
                     || !cpuCompleted.isEmpty() || !packCompleted.isEmpty() || !completed.isEmpty();
         }
     }
@@ -427,7 +430,9 @@ public final class RtDistantHorizonsTerrain {
     public Map<String, Long> streamingStats() {
         return Map.of("retargets", livePlanRetargets, "viewCancellations", viewPlanCancellations,
                 "epoch", epoch, "remaining", buildSession == null ? 0L : (long) buildSession.remaining.size(),
-                "residentCacheReuses", residentCacheReuses);
+                "residentCacheReuses", residentCacheReuses, "inFlight", (long)buildWindow.count(),
+                "peakInFlight",(long)buildWindow.peak(),"inFlightBytes",buildWindow.bytes(),
+                "packing",(long)packingBatches,"gpu",(long)gpuPending);
     }
 
     private void startCpuBuild(int originX, int originY, int originZ, int proxyRadius, long taskEpoch,
@@ -924,7 +929,7 @@ public final class RtDistantHorizonsTerrain {
                                   RtMaterialRegistry.Snapshot materials,
                                   long taskEpoch, long revision) {
         if (taskEpoch != epoch) return;
-        if (pending || packPending) {
+        if (buildWindow.count() != 0) {
             requestRetry();
             return;
         }
@@ -1047,8 +1052,8 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private void serviceBuildSession(RtContext ctx) {
-        if (pending || packPending) return;
         if (readyPlan != null) {
+            if (buildWindow.count() != 0) return;
             CpuCompleted next = readyPlan;
             readyPlan = null;
             if (next.epoch == epoch) queueAtomicBuild(ctx, next.plan, next.materials, next.epoch, next.revision);
@@ -1057,20 +1062,29 @@ public final class RtDistantHorizonsTerrain {
         BuildSession session = buildSession;
         if (session == null || cpuPending && session.transition != null) return;
 
+        int admitted=0;
         while (!session.remaining.isEmpty()) {
-            PlannedBatch next = session.remaining.removeFirst();
+            PlannedBatch next = session.remaining.peekFirst();
             if (next.reused != null) {
+                session.remaining.removeFirst();
                 session.acceptEntry(next.reused);
                 sourceBatchReady(session, next);
                 continue;
             }
             if (next.volume != null && next.slices.isEmpty()) {
+                session.remaining.removeFirst();
                 sourceBatchReady(session, next);
                 continue;
             }
-            schedulePack(next, session);
-            return;
+            long quads=0;
+            for(var slice:next.slices)quads+=slice.end-slice.start;
+            LodBuildWindow.Ticket ticket=buildWindow.acquire(65536L+quads*512L);
+            if(ticket==null)return;
+            session.remaining.removeFirst();
+            schedulePack(next, session,ticket);
+            if(++admitted>=8)return;
         }
+        if(buildWindow.count()!=0)return;
         if (session.workingEntries.isEmpty() && session.transition == null) {
             abortBuildSession();
             requestRetry();
@@ -1083,8 +1097,8 @@ public final class RtDistantHorizonsTerrain {
         publishBuildSession(ctx, true);
     }
 
-    private void schedulePack(PlannedBatch item, BuildSession session) {
-        packPending = true;
+    private void schedulePack(PlannedBatch item, BuildSession session,LodBuildWindow.Ticket ticket) {
+        packingBatches++;
         synchronized (activeLock) {
             activeTasks++;
         }
@@ -1102,7 +1116,7 @@ public final class RtDistantHorizonsTerrain {
             } catch (Throwable t) {
                 failure = t;
             } finally {
-                packCompleted.add(new PackCompleted(session.epoch, session.revision, item, packed, failure));
+                packCompleted.add(new PackCompleted(session.epoch, session.revision, item, packed, failure,ticket));
                 finishActiveTask();
             }
         });
@@ -1110,13 +1124,16 @@ public final class RtDistantHorizonsTerrain {
 
     private void drainPackCompleted(RtContext ctx) {
         PackCompleted done;
-        while ((done = packCompleted.poll()) != null) {
-            packPending = false;
+        int admitted=0;
+        while (admitted<8 && (done = packCompleted.poll()) != null) {
+            packingBatches--;
             BuildSession session = buildSession;
             if (done.epoch != epoch || session == null || done.revision != session.revision) {
+                buildWindow.release(done.ticket);
                 continue;
             }
             if (done.failure != null || done.mesh == null) {
+                buildWindow.release(done.ticket);
                 abortBuildSession();
                 requestRetry();
                 if (!(done.failure instanceof CancellationException)) {
@@ -1124,23 +1141,23 @@ public final class RtDistantHorizonsTerrain {
                 }
                 continue;
             }
-            schedule(ctx, done.item, done.mesh, done.epoch, done.revision);
+            schedule(ctx, done.item, done.mesh, done.epoch, done.revision,done.ticket);
+            admitted++;
         }
     }
 
     private void schedule(RtContext ctx, PlannedBatch item, PackedSection mesh,
-                          long taskEpoch, long revision) {
+                          long taskEpoch, long revision,LodBuildWindow.Ticket ticket) {
         PreparedSection prepared = null;
         boolean taskRegistered = false;
         try (var budgetScope=item.volume!=null ? ctx.lodAllocations() : null) {
-            // Only one changed/new bounded batch is prepared at a time. Unchanged source meshes never
-            // allocate staging, build inputs, scratch, or replacement BLAS memory. Compaction follows the
-            // same player-facing toggle as vanilla terrain sections.
+            // The window bounds packing, upload, build and compaction together. Unchanged source meshes
+            // allocate none of these transient resources; completions are published once per render pass.
             prepared = RtSectionBuilder.prepare(ctx, mesh, null,
                     CausticaConfig.Rt.Terrain.BLAS_COMPACTION.value(), item.batchKey,
                     item.originX, 0, item.originZ);
             PreparedSection owned = prepared;
-            pending = true;
+            gpuPending++;
             synchronized (activeLock) {
                 activeTasks++;
                 taskRegistered = true;
@@ -1160,22 +1177,22 @@ public final class RtDistantHorizonsTerrain {
                             RtSectionBuilder.destroy(owned);
                             completed.add(new Completed(taskEpoch, revision, item, null, build,
                                     failure != null ? failure
-                                            : new CancellationException("DH proxy epoch changed after BLAS build")));
+                                            : new CancellationException("DH proxy epoch changed after BLAS build"),ticket));
                             finishActiveTask();
                             return;
                         }
                         if (owned.blas().requestsCompaction()) {
-                            submitCompaction(ctx, owned, item, taskEpoch, revision, build);
+                            submitCompaction(ctx, owned, item, taskEpoch, revision, build,ticket);
                         } else {
                             owned.releaseBuildInputs();
-                            completed.add(new Completed(taskEpoch, revision, item, owned, build, null));
+                            completed.add(new Completed(taskEpoch, revision, item, owned, build, null,ticket));
                             finishActiveTask();
                         }
                     });
         } catch (Throwable t) {
-            if (taskRegistered) finishActiveTask();
+            if (taskRegistered) { gpuPending--; finishActiveTask(); }
             if (prepared != null) RtSectionBuilder.destroy(prepared);
-            pending = false;
+            buildWindow.release(ticket);
             if(t instanceof RtLodMemory.Pressure pressure) { deferForMemory(ctx,pressure); return; }
             abortBuildSession();
             requestRetry();
@@ -1184,13 +1201,13 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private void submitCompaction(RtContext ctx, PreparedSection prepared, PlannedBatch item,
-                                  long taskEpoch, long revision, RtGpuExecutor.Build sourceBuild) {
+                                  long taskEpoch, long revision, RtGpuExecutor.Build sourceBuild,LodBuildWindow.Ticket ticket) {
         RtAccel.PreparedTerrainCompaction compaction;
         try (var budgetScope=item.volume!=null ? ctx.lodAllocations() : null) {
             compaction = RtAccel.prepareTerrainCompaction(ctx, prepared.blas());
         } catch (Throwable t) {
             RtSectionBuilder.destroy(prepared);
-            completed.add(new Completed(taskEpoch, revision, item, null, sourceBuild, t));
+            completed.add(new Completed(taskEpoch, revision, item, null, sourceBuild, t,ticket));
             finishActiveTask();
             return;
         }
@@ -1212,10 +1229,10 @@ public final class RtDistantHorizonsTerrain {
                                 terminal.addSuppressed(destroyFailure);
                             }
                             RtSectionBuilder.destroy(prepared);
-                            completed.add(new Completed(taskEpoch, revision, item, null, copyBuild, terminal));
+                            completed.add(new Completed(taskEpoch, revision, item, null, copyBuild, terminal,ticket));
                         } else {
                             completed.add(new Completed(taskEpoch, revision, item,
-                                    prepared.withBlas(compaction.compacted()), copyBuild, null));
+                                    prepared.withBlas(compaction.compacted()), copyBuild, null,ticket));
                         }
                         finishActiveTask();
                     });
@@ -1226,7 +1243,7 @@ public final class RtDistantHorizonsTerrain {
                 t.addSuppressed(destroyFailure);
             }
             RtSectionBuilder.destroy(prepared);
-            completed.add(new Completed(taskEpoch, revision, item, null, sourceBuild, t));
+            completed.add(new Completed(taskEpoch, revision, item, null, sourceBuild, t,ticket));
             finishActiveTask();
         }
     }
@@ -1241,7 +1258,8 @@ public final class RtDistantHorizonsTerrain {
     private void drainCompleted(RtContext ctx) {
         Completed done;
         while ((done = completed.poll()) != null) {
-            pending = false;
+            gpuPending--;
+            buildWindow.release(done.ticket);
             PreparedSection prepared = done.prepared;
             if (done.epoch != epoch) {
                 if (prepared != null) destroyBuilt(prepared);
@@ -1270,9 +1288,9 @@ public final class RtDistantHorizonsTerrain {
             session.owned.add(geom);
             session.builtCount++;
             sourceBatchReady(session, item);
-            session.lastBuild = done.build;
-            maybePublishProgress(ctx, session);
+            if(session.lastBuild==null || done.build.value()>session.lastBuild.value())session.lastBuild = done.build;
         }
+        if(buildSession!=null)maybePublishProgress(ctx,buildSession);
     }
 
     private void sourceBatchReady(BuildSession session, PlannedBatch batch) {
@@ -1460,6 +1478,8 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private void abortBuildSession() {
+        epoch++; // Cancel only real failure/reset work; camera retargeting never enters this path.
+        cpuPending=false;
         readyPlan = null;
         BuildSession session = buildSession;
         buildSession = null;
@@ -1528,17 +1548,19 @@ public final class RtDistantHorizonsTerrain {
         Completed done;
         while ((done = completed.poll()) != null) {
             if (done.prepared != null) destroyBuilt(done.prepared);
+            buildWindow.release(done.ticket);
         }
-        packCompleted.clear();
-        packPending = false;
+        PackCompleted packed;
+        while((packed=packCompleted.poll())!=null)buildWindow.release(packed.ticket);
+        packingBatches = 0;
         abortBuildSession();
         if (current != null) current.destroy();
         current = null;
         instanceProxy = null;
         frameDhInstances = new RtAccel.Instance[0];
-        pending = false;
+        gpuPending = 0;
         cpuPending = false;
-        packPending = false;
+        packingBatches = 0;
         bootstrapComplete = false;
         manualRefreshRequested.set(false);
         forceSourceRebuild = false;
@@ -1550,7 +1572,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private record Completed(long epoch, long revision, PlannedBatch item, PreparedSection prepared,
-                             RtGpuExecutor.Build build, Throwable failure) {
+                             RtGpuExecutor.Build build, Throwable failure,LodBuildWindow.Ticket ticket) {
     }
 
     private record CpuCompleted(long epoch, long revision, List<PlannedBatch> plan,
@@ -1559,7 +1581,7 @@ public final class RtDistantHorizonsTerrain {
     }
 
     private record PackCompleted(long epoch, long revision, PlannedBatch item,
-                                 PackedSection mesh, Throwable failure) {
+                                 PackedSection mesh, Throwable failure,LodBuildWindow.Ticket ticket) {
     }
 
     private record PlannedBatch(long batchKey, long sourceKey, long sourceVersion, int originX, int originZ,
