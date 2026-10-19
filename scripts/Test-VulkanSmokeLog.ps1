@@ -9,6 +9,11 @@ $guides="$clean`nGYSF_WATER_GUIDES: PASS phases=4 locked=true jitter=0 staticWav
 $optics="$clean`nGYSF_WATER_GUIDES: PASS phases=8 locked=true jitter=0 staticWaves=true"+
     ("`nGYSF_GUIDE_CAPTURE: saved=x"*8)+"`nGuide readback shutdown: live=0 bytes, peak=64 bytes, captures=8"
 $cases=@(
+    @{Name='weather-qualified';Text="GYSF_WEATHER: PASS captures=7 columns=441 rain=0.0..1.0 frames=1000`nRT LOD native shutdown: live=0 bytes";Reject=$false;Weather=$true},
+    @{Name='weather-incomplete';Text="GYSF_WEATHER: PASS captures=6 columns=441 rain=0.0..1.0 frames=1000`nRT LOD native shutdown: live=0 bytes";Reject=$true;Weather=$true},
+    @{Name='weather-dry';Text="GYSF_WEATHER: PASS captures=7 columns=0 rain=0.0..1.0 frames=1000`nRT LOD native shutdown: live=0 bytes";Reject=$true;Weather=$true},
+    @{Name='weather-no-transition';Text="GYSF_WEATHER: PASS captures=7 columns=441 rain=1.0..1.0 frames=1000`nRT LOD native shutdown: live=0 bytes";Reject=$true;Weather=$true},
+    @{Name='weather-validation';Text="GYSF_WEATHER: PASS captures=7 columns=441 rain=0.0..1.0 frames=1000`nRT LOD native shutdown: live=0 bytes`nSYNC-HAZARD";Reject=$true;Weather=$true},
     @{Name='clean';Text=$clean;Reject=$false},
     @{Name='ngx-clear-no-vuid';Text="$clean`nvkCmdClearColorImage(): WRITE_AFTER_WRITE hazard detected. nv.ngx.dlssd.resource";Reject=$true},
     @{Name='missing-pass';Text='RT LOD native shutdown: live=0 bytes';Reject=$true},
@@ -40,7 +45,7 @@ foreach($case in $cases) {
     Set-Content -LiteralPath $casePath -Value $case.Text -Encoding utf8
     $rejected=$false
     $taskGuideCount=if($case.GuideCount){$case.GuideCount}else{4}
-    try { & (Join-Path $PSScriptRoot 'Assert-VulkanSmokeLog.ps1') -Path $casePath -RequireWaterField:([bool]$case.Field) -RequireWaterGuides:([bool]$case.Guides) -GuideCaptureCount $taskGuideCount -RequireGpuTimings:([bool]$case.Timings) -RequireWaterBoundsCache:([bool]$case.Cache) | Out-Null }
+    try { & (Join-Path $PSScriptRoot 'Assert-VulkanSmokeLog.ps1') -Path $casePath -RequireWeather:([bool]$case.Weather) -RequireWaterField:([bool]$case.Field) -RequireWaterGuides:([bool]$case.Guides) -GuideCaptureCount $taskGuideCount -RequireGpuTimings:([bool]$case.Timings) -RequireWaterBoundsCache:([bool]$case.Cache) | Out-Null }
     catch {$rejected=$true}
     if($rejected -ne $case.Reject) {throw "Smoke log checker regression: $($case.Name)"}
 }

@@ -15,4 +15,3 @@ abstract class PerformanceMouseMixin {
     @Inject(method="turnPlayer",at=@At("HEAD"),cancellable=true)
     private void gysf$ignoreBenchmarkMouse(double elapsed,CallbackInfo ci) {if(PerformanceCapture.locked() || WaterCameraCapture.locked() || WaterGuideCapture.locked() || LodReentryCapture.locked() || WeatherCapture.locked())ci.cancel();}
 }
-

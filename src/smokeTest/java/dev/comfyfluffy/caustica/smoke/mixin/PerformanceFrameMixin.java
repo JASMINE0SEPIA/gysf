@@ -21,4 +21,3 @@ abstract class PerformanceFrameMixin {
     @Inject(method="runTick",at=@At("TAIL"))
     private void gysf$sampleFrame(boolean advanceGameTime,CallbackInfo ci) { PerformanceCapture.frame(); }
 }
-
