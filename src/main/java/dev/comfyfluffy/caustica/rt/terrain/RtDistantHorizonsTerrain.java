@@ -372,6 +372,10 @@ public final class RtDistantHorizonsTerrain {
         Proxy proxy=current;
         return proxy!=null && proxy.coverage.containsSection(sectionX,sectionY,sectionZ);
     }
+    public boolean hasPublishedSource(long key,long version) {
+        SourceState source=current==null ? null : current.sources.get(key);
+        return source!=null && source.version==version;
+    }
 
     private void pollMemoryBudget(RtContext ctx) {
         if(!VoxyCompat.active()) return;
@@ -1457,6 +1461,9 @@ public final class RtDistantHorizonsTerrain {
 
             if (finished) {
                 bootstrapComplete = true;
+                for(var geom:session.owned)geom.destroy(); // Completed fallback never published by this session.
+                session.owned.clear();
+                session.stagedEntries.clear();
                 buildSession = null;
                 long now = System.nanoTime();
                 nextRefresh = now + refreshDelayNanos(now);
@@ -1654,7 +1661,7 @@ public final class RtDistantHorizonsTerrain {
                 for(PlannedBatch b:remaining) {
                     if(b.volume.width()>64||workingVolumes.containsKey(b.sourceKey)
                             ||b.reused==null&&b.slices.isEmpty())continue;
-                    var cached=fineCache.take(b.sourceKey);
+                    var cached=fineCache.takeMatching(b.sourceKey,b.sourceVersion);
                     if(cached==null)continue;
                     if(!cached.volume().equals(b.volume)){destroyCached(cached);continue;}
                     for(var entry:cached.batches()) {
