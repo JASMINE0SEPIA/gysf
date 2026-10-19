@@ -15,6 +15,7 @@ final class VoxySceneReader {
     private final Method refinementPending;
     private boolean pendingRefinement;
     private Object previous, previousModels;
+    private int[] previousColours;
     private VoxySceneData.Palette palette;
     private long currentEpoch = Long.MIN_VALUE;
     private final VoxyMeshCache meshCache = new VoxyMeshCache(256L << 20);
@@ -55,7 +56,8 @@ final class VoxySceneReader {
         if(nextEpoch!=currentEpoch) { clear(); currentEpoch=nextEpoch; }
         pendingRefinement=refinementPending!=null && (boolean)refinementPending.invoke(scene);
         Object nextModels=models.invoke(scene);
-        if(previousModels!=nextModels) {
+        int[] nextColours=(int[])colours.invoke(scene);
+        if(previousModels!=nextModels || !Arrays.equals(previousColours,nextColours)) {
             VoxySceneData.Model[] entries=new VoxySceneData.Model[65536];
             for(Object model:((Map<?,?>)nextModels).values()) {
                 int[] v=new int[9];
@@ -66,8 +68,8 @@ final class VoxySceneReader {
                 entries[v[0]]=new VoxySceneData.Model(v[0],v[1],v[2],v[3],v[4],v[5],v[6],v[7],v[8],state,
                         fluid,water,VoxySceneData.isGlass(v[7],fluid),state.getLightEmission());
             }
-            palette=new VoxySceneData.Palette(entries,(int[])colours.invoke(scene));
-            previousModels=nextModels;
+            palette=new VoxySceneData.Palette(entries,nextColours);
+            previousModels=nextModels; previousColours=nextColours;
         }
         ArrayList<DistantHorizonsCompat.LodMesh> result=new ArrayList<>();
         Set<Long> keep=new HashSet<>();
@@ -111,7 +113,7 @@ final class VoxySceneReader {
     Map<String,Long> cacheStats() { return Map.of("hits",cacheHits,"returnHits",returnHits,
             "bytes",meshCache.bytes(),"sources",(long)meshCache.size()); }
     void clear() {
-        cache.clear(); meshCache.clear(); previous=previousModels=null; palette=null; published=List.of();
+        cache.clear(); meshCache.clear(); previous=previousModels=null; previousColours=null; palette=null; published=List.of();
         currentEpoch=Long.MIN_VALUE; atlasView=0; atlasOwner=new Object();
         pendingRefinement=false;
     }
