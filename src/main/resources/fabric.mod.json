@@ -4,6 +4,7 @@
   "provides": ["caustica"],
   "version": "${version}",
   "name": "gysf",
+  "icon": "assets/caustica/icon-gysf.png",
   "description": "Hardware-ray-traced renderer with DLSS Ray Reconstruction for the Minecraft Vulkan backend.",
   "authors": [
     "ComfyFluffy",
@@ -21,6 +22,9 @@
     ],
     "client": [
       "dev.comfyfluffy.caustica.client.CausticaClient"
+    ],
+    "sodium:config_api_user": [
+      "dev.comfyfluffy.caustica.compat.sodium.GysfSodiumOptions"
     ]
   },
   "mixins": [

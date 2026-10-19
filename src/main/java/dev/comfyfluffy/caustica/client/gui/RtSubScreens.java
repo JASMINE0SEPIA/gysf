@@ -305,7 +305,8 @@ public final class RtSubScreens {
                 CausticaConfig.Rt.Composite.FOG_DENSITY,
                 CausticaConfig.Rt.Composite.FOG_DISTANCE,
                 CausticaConfig.Rt.Composite.FOG_ANISOTROPY,
-                CausticaConfig.Rt.Composite.FOG_HEIGHT_FALLOFF);
+                CausticaConfig.Rt.Composite.FOG_HEIGHT_FALLOFF,
+                CausticaConfig.Rt.Composite.FOG_BIOME_TINT);
     }
 
     private static List<CausticaConfig.RuntimeSetting<?>> exposureSettings() {
@@ -370,6 +371,7 @@ public final class RtSubScreens {
                 waterSettings(),
                 pomSettings(),
                 cloudsSettings(),
+                fogSettings(),
                 exposureSettings(),
                 tonemapSettings(),
                 hdrSettings(),

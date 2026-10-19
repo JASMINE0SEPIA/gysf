@@ -18,6 +18,11 @@ base {
 
 repositories {
 	maven {
+		name = "Modrinth"
+		url = "https://api.modrinth.com/maven"
+		content { includeGroup "maven.modrinth" }
+	}
+	maven {
 		name = "Fabric"
 		url = "https://maven.fabricmc.net/"
 	}
@@ -53,6 +58,8 @@ dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	// Optional settings integration: Sodium loads its entrypoint only when installed.
+	compileOnly "maven.modrinth:sodium:mc26.3-0.9.3-beta.1-fabric"
 	testImplementation platform("org.junit:junit-bom:5.14.4")
 	testImplementation "org.junit.jupiter:junit-jupiter"
 	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
