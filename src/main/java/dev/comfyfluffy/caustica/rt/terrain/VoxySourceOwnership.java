@@ -68,6 +68,19 @@ final class VoxySourceOwnership {
         return false;
     }
 
+    boolean hasCoarser(VoxyLodTransition.Volume volume) {
+        for(int width=volume.width()*2;width<=512;width*=2) {
+            int x=Math.floorDiv(volume.x(),width)*width,y=Math.floorDiv(volume.y(),width)*width,
+                    z=Math.floorDiv(volume.z(),width)*width;
+            int slot=hash(x,y,z,width)&mask;
+            while(slots[slot*4+3]!=0) {
+                if(matches(slot,x,y,z,width))return true;
+                slot=(slot+1)&mask;
+            }
+        }
+        return false;
+    }
+
     private boolean matches(int slot, int x, int y, int z, int w) {
         int p = slot * 4;
         return slots[p] == x && slots[p + 1] == y && slots[p + 2] == z && slots[p + 3] == w;

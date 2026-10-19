@@ -1050,14 +1050,13 @@ public final class RtDistantHorizonsTerrain {
                 ctx.lodMemoryLimitBytes(heap)/8);
     }
 
-    private List<VoxyDetailCache.Entry<GeomEntry>> cacheCandidates(Proxy old,Proxy next) {
+    private List<VoxyDetailCache.Entry<GeomEntry>> cacheCandidates(Proxy old,Proxy next,VoxySourceOwnership ownership) {
         List<VoxyDetailCache.Entry<GeomEntry>> result=new ArrayList<>();
         for(var source:old.sources.entrySet()) {
             var entries=source.getValue().entries;
             var volume=entries.getFirst().volume;
             if(volume==null||volume.width()>64||next.volumes.containsKey(source.getKey()))continue;
-            if(next.volumes.values().stream().noneMatch(v->v.width()>volume.width()
-                    &&VoxySourceOwnership.contains(v,volume)))continue;
+            if(!ownership.hasCoarser(volume))continue;
             result.add(new VoxyDetailCache.Entry<>(volume,source.getValue().version,entries,sourceBytes(entries)));
         }
         return result;
@@ -1075,7 +1074,13 @@ public final class RtDistantHorizonsTerrain {
         if (session == null || cpuPending && session.transition != null) return;
 
         int admitted=0;
+        long metadataDeadline=System.nanoTime()+2_000_000L;
+        int serviced=0;
         while (!session.remaining.isEmpty()) {
+            if(serviced++>0 && System.nanoTime()>=metadataDeadline) {
+                maybePublishProgress(ctx,session);
+                return;
+            }
             PlannedBatch next = session.remaining.peekFirst();
             if (next.reused != null) {
                 session.remaining.removeFirst();
@@ -1104,8 +1109,10 @@ public final class RtDistantHorizonsTerrain {
         }
         // Only the final checkpoint drops batches that DH no longer reports. Intermediate snapshots keep
         // the old geometry for not-yet-resolved sources, so progressive publication never creates holes.
-        session.workingEntries.keySet().removeIf(key -> !session.finalBatchKeys.contains(key));
-        session.workingVolumes.keySet().removeIf(key -> !session.finalSourceKeys.contains(key));
+        for(long key:List.copyOf(session.workingEntries.keySet()))
+            if(!session.finalBatchKeys.contains(key))session.removeWorkingEntry(key);
+        for(long source:List.copyOf(session.workingVolumes.keySet()))
+            if(!session.finalSourceKeys.contains(source))session.removeWorkingSource(source);
         publishBuildSession(ctx, true);
     }
 
@@ -1316,25 +1323,28 @@ public final class RtDistantHorizonsTerrain {
             // A whole source is safe to expose immediately. Coarser ancestors remain fallback only:
             // the immutable GPU index clips them exactly where this finer (possibly empty) cube owns.
             var volume = batch.volume;
-            Set<Long> replaced = VoxySourceOwnership.activate(session.workingVolumes, volume);
-            session.workingEntries.values().removeIf(e -> replaced.contains(e.sourceKey));
+            Set<Long> replaced = session.volumeLookup.contained(volume);
+            replaced.forEach(session::removeWorkingSource);
+            session.putWorkingVolume(volume);
             for (GeomEntry entry : session.stagedEntries.getOrDefault(batch.sourceKey, List.of()))
-                session.workingEntries.put(entry.batchKey, entry);
+                session.putWorkingEntry(entry);
             session.readyChanges = true;
         }
         if (swap == null) return;
-        boolean replacement = session.workingEntries.values().stream().anyMatch(e -> {
-            if (!swap.retired().contains(e.sourceKey)) return false;
-            List<GeomEntry> staged = session.stagedEntries.get(e.sourceKey);
-            return !swap.activated().contains(e.sourceKey) || staged == null
-                    || staged.getFirst().sourceVersion != e.sourceVersion;
-        });
-        session.workingEntries.values().removeIf(e -> swap.retired().contains(e.sourceKey));
-        swap.retired().forEach(session.workingVolumes::remove);
+        boolean replacement = false;
+        for(long source:swap.retired()) {
+            var keys=session.sourceBatchKeys.get(source);
+            if(keys==null || keys.isEmpty())continue;
+            List<GeomEntry> staged=session.stagedEntries.get(source);
+            if(!swap.activated().contains(source) || staged==null
+                    || staged.getFirst().sourceVersion!=session.workingEntries.get(keys.iterator().next()).sourceVersion)
+                replacement=true;
+        }
+        swap.retired().forEach(session::removeWorkingSource);
         for (long source : swap.activated()) {
             List<GeomEntry> staged = session.stagedEntries.remove(source);
-            if (staged != null) for (GeomEntry entry : staged) session.workingEntries.put(entry.batchKey, entry);
-            session.workingVolumes.put(source, session.nextVolumes.get(source));
+            if (staged != null) for (GeomEntry entry : staged) session.putWorkingEntry(entry);
+            session.putWorkingVolume(session.nextVolumes.get(source));
         }
         session.readyChanges = true;
         // Topology replacement can expose refined detail immediately. New independent sources and
@@ -1360,7 +1370,7 @@ public final class RtDistantHorizonsTerrain {
         }
         if (removable.isEmpty()) return;
         int before = session.workingEntries.size();
-        session.workingEntries.entrySet().removeIf(entry -> removable.contains(entry.getValue().sourceKey));
+        removable.forEach(session::removeWorkingSource);
         int removedBatches = before - session.workingEntries.size();
         if (removedBatches > 0) {
             session.coverageChanged = true;
@@ -1455,7 +1465,7 @@ public final class RtDistantHorizonsTerrain {
             if (old != null) {
                 Set<RtSectionTable.SectionGeom> retained = next.geomIdentitySet();
                 long cacheLimit=fineCacheLimit(ctx);
-                var candidates=cacheLimit>0 ? cacheCandidates(old,next) : List.<VoxyDetailCache.Entry<GeomEntry>>of();
+                var candidates=cacheLimit>0 ? cacheCandidates(old,next,ownership) : List.<VoxyDetailCache.Entry<GeomEntry>>of();
                 for(var candidate:candidates)for(var e:candidate.batches())retained.add(e.geom);
                 long cacheScope;
                 synchronized(fineCache){cacheScope=fineCacheScope;}
@@ -1629,6 +1639,8 @@ public final class RtDistantHorizonsTerrain {
         final RtMaterialRegistry.Snapshot materials;
         final LinkedHashMap<Long, GeomEntry> workingEntries = new LinkedHashMap<>();
         final Map<Long, VoxyLodTransition.Volume> workingVolumes = new LinkedHashMap<>();
+        final VoxySourceLookup volumeLookup=new VoxySourceLookup();
+        final Map<Long,Set<Long>> sourceBatchKeys=new HashMap<>();
         final Map<Long, VoxyLodTransition.Volume> nextVolumes = new LinkedHashMap<>();
         final Set<Long> finalBatchKeys = new HashSet<>();
         final Set<Long> finalSourceKeys = new HashSet<>();
@@ -1656,8 +1668,8 @@ public final class RtDistantHorizonsTerrain {
             this.remaining = remaining;
             this.materials = materials;
             if (base != null) {
-                for (GeomEntry entry : base.entries) workingEntries.put(entry.batchKey, entry);
-                workingVolumes.putAll(base.volumes);
+                for (GeomEntry entry : base.entries) putWorkingEntry(entry);
+                base.volumes.values().forEach(this::putWorkingVolume);
             }
             int builds = 0;
             for (PlannedBatch batch : remaining) {
@@ -1679,9 +1691,9 @@ public final class RtDistantHorizonsTerrain {
                     if(cached==null)continue;
                     if(!cached.volume().equals(b.volume)){destroyCached(cached);continue;}
                     for(var entry:cached.batches()) {
-                        workingEntries.put(entry.batchKey,entry);owned.add(entry.geom);
+                        putWorkingEntry(entry);owned.add(entry.geom);
                     }
-                    workingVolumes.put(b.sourceKey,cached.volume());
+                    putWorkingVolume(cached.volume());
                     coverageChanged=true;restoredFineCount++;restoredFineBytes+=cached.bytes();
                 }
                 Map<Long, Integer> batchCounts = new HashMap<>();
@@ -1689,14 +1701,36 @@ public final class RtDistantHorizonsTerrain {
                 transition = new VoxyLodTransition(List.copyOf(workingVolumes.values()),
                         List.copyOf(nextVolumes.values()), batchCounts, true);
                 Set<Long> obsolete = transition.obsoleteSources();
-                coverageChanged |= workingEntries.values().removeIf(e -> obsolete.contains(e.sourceKey));
-                coverageChanged |= workingVolumes.keySet().removeIf(obsolete::contains);
+                int oldSize=workingEntries.size()+workingVolumes.size();
+                obsolete.forEach(this::removeWorkingSource);
+                coverageChanged |= oldSize!=workingEntries.size()+workingVolumes.size();
             } else transition = null;
         }
 
         void acceptEntry(GeomEntry entry) {
-            if (transition == null) workingEntries.put(entry.batchKey, entry);
+            if (transition == null) putWorkingEntry(entry);
             else stagedEntries.computeIfAbsent(entry.sourceKey, ignored -> new ArrayList<>()).add(entry);
+        }
+
+        void putWorkingEntry(GeomEntry entry) {
+            removeWorkingEntry(entry.batchKey);
+            workingEntries.put(entry.batchKey,entry);
+            sourceBatchKeys.computeIfAbsent(entry.sourceKey,k->new HashSet<>()).add(entry.batchKey);
+        }
+        void removeWorkingEntry(long batchKey) {
+            GeomEntry old=workingEntries.remove(batchKey);
+            if(old==null)return;
+            Set<Long> keys=sourceBatchKeys.get(old.sourceKey);
+            keys.remove(batchKey);
+            if(keys.isEmpty())sourceBatchKeys.remove(old.sourceKey);
+        }
+        void putWorkingVolume(VoxyLodTransition.Volume volume) {
+            volumeLookup.put(volume);workingVolumes.put(volume.key(),volume);
+        }
+        void removeWorkingSource(long source) {
+            Set<Long> keys=sourceBatchKeys.remove(source);
+            if(keys!=null)keys.forEach(workingEntries::remove);
+            workingVolumes.remove(source);volumeLookup.remove(source);
         }
 
         boolean markBatchReady(PlannedBatch batch) {
