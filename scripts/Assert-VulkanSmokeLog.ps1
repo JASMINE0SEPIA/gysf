@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync,[switch]$RequireWaterField,[switch]$RequireWaterGuides,[switch]$RequireGpuTimings,[switch]$RequireWaterBoundsCache,[switch]$RequireNearPressure,[switch]$RequireLodReentry,[switch]$RequireWeather,
+param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync,[switch]$RequireWaterField,[switch]$RequireWaterGuides,[switch]$RequireGpuTimings,[switch]$RequireWaterBoundsCache,[switch]$RequireNearPressure,[switch]$RequireLodReentry,[switch]$RequireLodStreaming,[switch]$RequireLodTurns,[switch]$RequireWeather,
       [ValidateRange(1,64)][int]$GuideCaptureCount=4)
 $ErrorActionPreference='Stop'
 $content=Get-Content -LiteralPath $Path -Raw
@@ -13,7 +13,7 @@ if($RequireWeather) {
     if($weather.Count -ne 1 -or [int]$weather[0].Groups[1].Value -ne 7 -or [int]$weather[0].Groups[2].Value -lt 20 -or [long]$weather[0].Groups[3].Value -lt 300) {
         throw "Missing completed rain/light/roof replay in $Path"
     }
-} elseif($RequireLodReentry) {
+} elseif($RequireLodReentry -or $RequireLodStreaming) {
     $reentry=[regex]::Matches($content,'GYSF_LOD_REENTRY: PASS cold=(true|false) far=(\d+) resident=(\d+) publishedFar=(\d+) ingest=false frames=(\d+)')
     if($reentry.Count -ne 1){throw "Missing unique disk-only LOD reentry PASS marker in $Path"}
     $r=$reentry[0].Groups
@@ -29,6 +29,21 @@ if($RequireWeather) {
         throw "Near-pressure contraction/recovery/ownership qualification failed in $Path"
     }
 } elseif($content -notmatch 'GYSF_(SMOKE|PERF|PLAYER_VISUAL): PASS') {throw "Missing smoke/performance/visual PASS marker in $Path"}
+if($RequireLodStreaming) {
+    $streaming=[regex]::Matches($content,'GYSF_LOD_STREAMING: PASS cancelled=(\d+) pending=(true|false) distance=(\d+) inFlight=(\d+) peak=(\d+) remaining=(\d+)')
+    if($streaming.Count -ne 1){throw "Missing unique fully drained LOD streaming marker in $Path"}
+    $s=$streaming[0].Groups
+    if([long]$s[1].Value -ne 0 -or $s[2].Value -ne 'false' -or [long]$s[3].Value -ne 0 -or
+       [long]$s[4].Value -ne 0 -or [long]$s[5].Value -lt 2 -or [long]$s[6].Value -ne 0) {
+        throw "LOD stream cancelled work, reduced distance or left pending batches in $Path"
+    }
+}
+if($RequireLodTurns) {
+    $turns=[regex]::Matches($content,'GYSF_LOD_TURN: PASS[^\r\n]+')
+    if($turns.Count -eq 0 -or ($turns | Where-Object {$_.Value -notmatch 'viewCancellations=0[,}]' -or $_.Value -notmatch 'retargets=[1-9]\d*[,}]'})) {
+        throw "Missing uninterrupted LOD progress under camera turns in $Path"
+    }
+}
 $shutdowns=[regex]::Matches($content,'RT LOD native shutdown: live=(\d+) bytes')
 if($shutdowns.Count -eq 0 -or ($shutdowns | Where-Object { [long]$_.Groups[1].Value -ne 0 })) {
     throw "Missing or nonzero native LOD shutdown in $Path"

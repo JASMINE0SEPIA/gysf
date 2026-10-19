@@ -4,11 +4,22 @@ $ErrorActionPreference='Stop'
 $testRoot=Join-Path (Split-Path -Parent $PSScriptRoot) 'build/validation-log-tests'
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 $clean="Synthetic checker fixture`nGYSF_SMOKE: PASS`nRT LOD native shutdown: live=0 bytes"
+$streaming="$clean`nGYSF_LOD_REENTRY: PASS cold=true far=4954 resident=5349 publishedFar=4000 ingest=false frames=1200`nGYSF_LOD_STREAMING: PASS cancelled=0 pending=false distance=0 inFlight=0 peak=16 remaining=0`nGYSF_LOD_TURN: PASS {viewCancellations=0, retargets=11}"
 $guides="$clean`nGYSF_WATER_GUIDES: PASS phases=4 locked=true jitter=0 staticWaves=true"+
     ("`nGYSF_GUIDE_CAPTURE: saved=x"*4)+"`nGuide readback shutdown: live=0 bytes, peak=64 bytes, captures=4"
 $optics="$clean`nGYSF_WATER_GUIDES: PASS phases=8 locked=true jitter=0 staticWaves=true"+
     ("`nGYSF_GUIDE_CAPTURE: saved=x"*8)+"`nGuide readback shutdown: live=0 bytes, peak=64 bytes, captures=8"
 $cases=@(
+    @{Name='streaming-qualified';Text=$streaming;Reject=$false;Streaming=$true;Turns=$true},
+    @{Name='streaming-missing';Text=$clean;Reject=$true;Streaming=$true},
+    @{Name='streaming-cancelled';Text=$streaming.Replace('cancelled=0','cancelled=1');Reject=$true;Streaming=$true},
+    @{Name='streaming-pending';Text=$streaming.Replace('pending=false','pending=true');Reject=$true;Streaming=$true},
+    @{Name='streaming-distance';Text=$streaming.Replace('distance=0','distance=512');Reject=$true;Streaming=$true},
+    @{Name='streaming-inflight';Text=$streaming.Replace('inFlight=0','inFlight=1');Reject=$true;Streaming=$true},
+    @{Name='streaming-serial';Text=$streaming.Replace('peak=16','peak=1');Reject=$true;Streaming=$true},
+    @{Name='streaming-unfinished';Text=$streaming.Replace('remaining=0','remaining=1');Reject=$true;Streaming=$true},
+    @{Name='turns-missing';Text=$clean;Reject=$true;Turns=$true},
+    @{Name='turns-cancelled';Text=$streaming.Replace('viewCancellations=0','viewCancellations=1');Reject=$true;Turns=$true},
     @{Name='weather-qualified';Text="GYSF_WEATHER: PASS captures=7 columns=441 rain=0.0..1.0 frames=1000`nRT LOD native shutdown: live=0 bytes";Reject=$false;Weather=$true},
     @{Name='weather-incomplete';Text="GYSF_WEATHER: PASS captures=6 columns=441 rain=0.0..1.0 frames=1000`nRT LOD native shutdown: live=0 bytes";Reject=$true;Weather=$true},
     @{Name='weather-dry';Text="GYSF_WEATHER: PASS captures=7 columns=0 rain=0.0..1.0 frames=1000`nRT LOD native shutdown: live=0 bytes";Reject=$true;Weather=$true},
@@ -45,7 +56,7 @@ foreach($case in $cases) {
     Set-Content -LiteralPath $casePath -Value $case.Text -Encoding utf8
     $rejected=$false
     $taskGuideCount=if($case.GuideCount){$case.GuideCount}else{4}
-    try { & (Join-Path $PSScriptRoot 'Assert-VulkanSmokeLog.ps1') -Path $casePath -RequireWeather:([bool]$case.Weather) -RequireWaterField:([bool]$case.Field) -RequireWaterGuides:([bool]$case.Guides) -GuideCaptureCount $taskGuideCount -RequireGpuTimings:([bool]$case.Timings) -RequireWaterBoundsCache:([bool]$case.Cache) | Out-Null }
+    try { & (Join-Path $PSScriptRoot 'Assert-VulkanSmokeLog.ps1') -Path $casePath -RequireWeather:([bool]$case.Weather) -RequireWaterField:([bool]$case.Field) -RequireWaterGuides:([bool]$case.Guides) -GuideCaptureCount $taskGuideCount -RequireGpuTimings:([bool]$case.Timings) -RequireWaterBoundsCache:([bool]$case.Cache) -RequireLodStreaming:([bool]$case.Streaming) -RequireLodTurns:([bool]$case.Turns) | Out-Null }
     catch {$rejected=$true}
     if($rejected -ne $case.Reject) {throw "Smoke log checker regression: $($case.Name)"}
 }

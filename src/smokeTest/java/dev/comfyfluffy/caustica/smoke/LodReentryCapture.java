@@ -13,6 +13,7 @@ import net.minecraft.client.gui.screens.TitleScreen;
 public final class LodReentryCapture {
     private static volatile int cameraTicks;
     private static final boolean TURN = Boolean.getBoolean("gysf.smoke.reentry.turn");
+    private static final boolean TRAVEL = Boolean.getBoolean("gysf.smoke.reentry.travel");
     public static boolean locked() { return Boolean.getBoolean("gysf.smoke.reentry"); }
     public static void enforceCamera() {
         if (!locked()) return;
@@ -32,7 +33,9 @@ public final class LodReentryCapture {
     private boolean opened, finished;
     private long beforeEpoch;
     private long worldStartedNanos;
+    private boolean recordedCompletion;
     private int residentBeforeTurn;
+    private long editVersion, placedVersion, placedKey;
     private final Map<String, Object> results = new LinkedHashMap<>();
 
     void tick(Minecraft client) {
@@ -53,7 +56,7 @@ public final class LodReentryCapture {
             client.createWorldOpenFlows().openWorld("gysf-reentry", () -> {
                 throw new IllegalStateException("LOD replay cancelled");
             });
-            worldTicks = 0; stableTicks = 0; cameraTicks = 0; worldStartedNanos = 0;
+            worldTicks = 0; stableTicks = 0; cameraTicks = 0; worldStartedNanos = 0; recordedCompletion=false;
         }
         if (client.level == null || client.player == null) return;
         if (RtComposite.INSTANCE.hasFailed()) throw new IllegalStateException("RT failed during LOD reentry");
@@ -75,10 +78,44 @@ public final class LodReentryCapture {
             client.player.connection.sendCommand("gamerule minecraft:advance_time false");
             client.player.connection.sendCommand("tp @s 178.156 130 -284.910 35 15");
         }
+        if(TRAVEL && (COLD || phase==1)) {
+            if(worldTicks==650)client.player.connection.sendCommand("tp @s 690.156 130 -284.910 35 15");
+            if(worldTicks==1000)client.player.connection.sendCommand("tp @s 178.156 130 -284.910 35 15");
+            if(worldTicks==1100) {
+                var source=editedSource();
+                // Entirely empty air sections need not exist in the stored octree until the first edit.
+                editVersion=source==null ? -1 : source.version();VoxyCompat.setIngestEnabled(true);
+                client.player.connection.sendCommand("setblock 184 138 -280 minecraft:diamond_block");
+            }
+            if(worldTicks==1300) {
+                var source=editedSource();
+                if(source==null || source.version()==editVersion || !hasDiamond(source))
+                    throw new IllegalStateException("Changed block reused an obsolete Voxy snapshot");
+                placedVersion=source.version();
+                placedKey=source.key();
+                if(!RtDistantHorizonsTerrain.INSTANCE.hasPublishedSource(placedKey,placedVersion))
+                    throw new IllegalStateException("Edited block never reached the published GPU source");
+                client.player.connection.sendCommand("setblock 184 138 -280 minecraft:air");
+            }
+            if(worldTicks==1550) {
+                var source=editedSource();
+                if(source!=null && (source.version()==placedVersion || hasDiamond(source))
+                        || RtDistantHorizonsTerrain.INSTANCE.hasPublishedSource(placedKey,placedVersion))
+                    throw new IllegalStateException("Removed block remained in a CPU/GPU source: "
+                            +(source==null ? "empty" : source.version()));
+                VoxyCompat.setIngestEnabled(false);
+                System.out.println("GYSF_LOD_EDIT: PASS added="+placedVersion+" removed="+(source==null ? "empty" : source.version())
+                        +" staleGpu=false");
+            }
+        }
         if (worldTicks > 100 && worldTicks % 200 == 0) state(client, "progress-" + phase + "-" + worldTicks);
+        if(!recordedCompletion && worldTicks>100 && RtDistantHorizonsTerrain.INSTANCE.bootstrapComplete()
+                && !RtDistantHorizonsTerrain.INSTANCE.hasPendingBuilds() && !VoxyCompat.refinementPending()) {
+            recordedCompletion=true;state(client,"first-complete-"+phase);
+        }
         if (COLD || phase == 1) {
             if (worldTicks == 200) capture(client, COLD ? "cold-10s" : "reentry-10s");
-            if (worldTicks < 900) return;
+            if (worldTicks < (TRAVEL ? 1800 : 900)) return;
             if (Boolean.getBoolean("gysf.smoke.reentry.awaitCompletion")) {
                 boolean pending = RtDistantHorizonsTerrain.INSTANCE.hasPendingBuilds() || VoxyCompat.refinementPending();
                 stableTicks = pending ? 0 : stableTicks + 1;
@@ -96,6 +133,17 @@ public final class LodReentryCapture {
                         + " publishedFar=" + restoredCoverage);
             if (!BASELINE && !COLD && beforeEpoch == VoxyCompat.sceneEpoch())
                 throw new IllegalStateException("Reentry reused retired scene epoch");
+            if(Boolean.getBoolean("gysf.smoke.reentry.requireFullDistance")
+                    && RtDistantHorizonsTerrain.INSTANCE.memoryDistanceLimit()!=0)
+                throw new IllegalStateException("Restoration silently reduced the requested LOD distance");
+            if(Boolean.getBoolean("gysf.smoke.reentry.awaitCompletion")) {
+                var stats=RtDistantHorizonsTerrain.INSTANCE.streamingStats();
+                System.out.println("GYSF_LOD_STREAMING: PASS cancelled="+stats.get("viewCancellations")
+                        +" pending="+RtDistantHorizonsTerrain.INSTANCE.hasPendingBuilds()
+                        +" distance="+RtDistantHorizonsTerrain.INSTANCE.memoryDistanceLimit()
+                        +" inFlight="+stats.get("inFlight")+" peak="+stats.get("peakInFlight")
+                        +" remaining="+stats.get("remaining"));
+            }
             System.out.println("GYSF_LOD_REENTRY: " + (BASELINE ? "BASELINE" : "PASS")
                     + " cold=" + COLD + " far=" + restoredFar + " resident=" + resident
                     + " publishedFar=" + restoredCoverage + " ingest=" + VoxyCompat.ingestEnabled()
@@ -117,6 +165,22 @@ public final class LodReentryCapture {
             client.disconnectWithSavingScreen();
             client.gui.setScreen(new TitleScreen());
         }
+    }
+
+    private static dev.comfyfluffy.caustica.compat.DistantHorizonsCompat.LodMesh editedSource() {
+        for(var mesh:VoxyCompat.meshes())if(mesh.textured()!=null && mesh.dataPointWidth()==1
+                && mesh.originX()<=184 && mesh.originX()+mesh.width()>184
+                && mesh.originY()<=138 && mesh.originY()+mesh.width()>138
+                && mesh.originZ()<=-280 && mesh.originZ()+mesh.width()>-280)return mesh;
+        return null;
+    }
+    private static boolean hasDiamond(dev.comfyfluffy.caustica.compat.DistantHorizonsCompat.LodMesh source) {
+        var mesh=source.textured();
+        for(int q=0;q<mesh.quadCount();q++) {
+            var state=mesh.model((int)(mesh.quad(q)>>>26)&65535).state();
+            if(state!=null && state.is(net.minecraft.world.level.block.Blocks.DIAMOND_BLOCK))return true;
+        }
+        return false;
     }
 
     private static int farSources(Minecraft client) {
