@@ -7,6 +7,19 @@ import static dev.comfyfluffy.caustica.rt.RtLodMemory.MIB;
 import static org.junit.jupiter.api.Assertions.*;
 
 final class RtLodMemoryTest {
+    @Test void reportedDriverBudgetCanRestoreTheWorkingSetWithoutOverridingExplicitOrUnknownLimits() {
+        var reported=new RtLodMemory.Heap(3000*MIB,7000*MIB,1000*MIB,0,true);
+        assertEquals(3500*MIB,RtLodMemory.limitBytes(0,reported));
+        assertEquals(128*MIB,RtLodMemory.limitBytes(128,reported));
+        assertEquals(1750*MIB,RtLodMemory.limitBytes(0,new RtLodMemory.Heap(0,7000*MIB,0,0,false)));
+        assertEquals(4096*MIB,RtLodMemory.limitBytes(0,new RtLodMemory.Heap(0,32000*MIB,0,0,true)));
+    }
+    @Test void largerWorkingSetAllowanceStillProtectsNearRenderingWhenDriverHeadroomIsTight() {
+        var heap=new RtLodMemory.Heap(900*MIB,1024*MIB,0,0,true);
+        var memory=new RtLodMemory();
+        var failure=assertThrows(RtLodMemory.Pressure.class,()->memory.reserve(1,RtLodMemory.limitBytes(0,heap),heap,true));
+        assertFalse(failure.mayReduceDistance());assertEquals(0,memory.liveBytes());
+    }
     @Test void reusableAllocatorBlocksAreNotCountedAsFreshDriverGrowth() {
         var heap=new RtLodMemory.Heap(6450*MIB,6920*MIB,515*MIB,0,true,4800*MIB);
         assertEquals(470*MIB,heap.availableBytes());

@@ -221,7 +221,7 @@ public final class RtContext {
     public RtWaterBoundsCache waterBoundsCache() { return waterBoundsCache; }
     public void tickMemoryBudget() { Vma.vmaSetCurrentFrameIndex(vma, ++memoryFrame); }
     public long lodMemoryLimitBytes(RtLodMemory.Heap heap) {
-        return RtLodMemory.limitBytes(Long.getLong("gysf.voxy.memoryBudgetMiB",0L),heap.budgetBytes());
+        return RtLodMemory.limitBytes(Long.getLong("gysf.voxy.memoryBudgetMiB",0L),heap);
     }
     /** The driver estimate is process-wide; RT allocation statistics are a separate diagnostic value. */
     public synchronized RtLodMemory.Heap memoryBudget() {

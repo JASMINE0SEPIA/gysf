@@ -43,6 +43,12 @@ public final class RtLodMemory {
         return configuredMiB > 0 ? Math.clamp(configuredMiB, 1, 4096)*MIB
                 : Math.clamp(heapBudget/4, 256*MIB, 2048*MIB);
     }
+    public static long limitBytes(long configuredMiB, Heap heap) {
+        if(configuredMiB>0 || !heap.driverReported())return limitBytes(configuredMiB,heap.budgetBytes());
+        // Driver headroom is checked separately on every allocation, including growth since its last
+        // reading. A quarter-heap cap otherwise truncates a healthy cached world while gigabytes remain.
+        return Math.clamp(heap.budgetBytes()/2,256*MIB,4096*MIB);
+    }
     public synchronized long liveBytes() { return live; }
     public synchronized long peakBytes() { return peak; }
     public synchronized long deferralCount() { return deferrals; }
