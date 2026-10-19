@@ -16,6 +16,8 @@ import dev.comfyfluffy.caustica.rt.terrain.RtTerrainMesher.PackedSection;
 import net.minecraft.client.Minecraft;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.VK10;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 
 import java.util.AbstractList;
 import java.util.ArrayDeque;
@@ -1387,6 +1389,9 @@ public final class RtDistantHorizonsTerrain {
         int threshold = current == null && !session.publishedAny
                 ? INITIAL_PROGRESS_BATCHES : STEADY_PROGRESS_BATCHES;
         long now = System.nanoTime();
+        // Keep complete, published fallback while coalescing more ready sources. This bounds repeated
+        // whole-proxy table/TLAS work even when every completed batch changes octree ownership.
+        if(session.transition!=null && current!=null && now-session.lastPublishNanos<100_000_000L)return;
         if (session.coverageChanged || unpublished >= threshold
                 || (unpublished > 0 && now - session.lastPublishNanos >= PROGRESS_PUBLISH_NANOS)) {
             publishBuildSession(ctx, false);
@@ -1449,7 +1454,7 @@ public final class RtDistantHorizonsTerrain {
             }
 
             Proxy next = new Proxy(session.revision, entries, table, finished,
-                    Map.copyOf(session.workingVolumes), ownershipOffset);
+                    Collections.unmodifiableMap(new Long2ObjectOpenHashMap<>(session.workingVolumes)), ownershipOffset);
             Proxy old = current;
             current = next;
             instanceProxy = null;
@@ -1637,15 +1642,15 @@ public final class RtDistantHorizonsTerrain {
         final long revision;
         final ArrayDeque<PlannedBatch> remaining;
         final RtMaterialRegistry.Snapshot materials;
-        final LinkedHashMap<Long, GeomEntry> workingEntries = new LinkedHashMap<>();
-        final Map<Long, VoxyLodTransition.Volume> workingVolumes = new LinkedHashMap<>();
+        final Map<Long, GeomEntry> workingEntries = new Long2ObjectLinkedOpenHashMap<>();
+        final Map<Long, VoxyLodTransition.Volume> workingVolumes = new Long2ObjectLinkedOpenHashMap<>();
         final VoxySourceLookup volumeLookup=new VoxySourceLookup();
-        final Map<Long,Set<Long>> sourceBatchKeys=new HashMap<>();
+        final Map<Long,Set<Long>> sourceBatchKeys=new Long2ObjectOpenHashMap<>();
         final Map<Long, VoxyLodTransition.Volume> nextVolumes = new LinkedHashMap<>();
         final Set<Long> finalBatchKeys = new HashSet<>();
         final Set<Long> finalSourceKeys = new HashSet<>();
-        final Map<Long, SourceProgress> sourceProgress = new HashMap<>();
-        final Map<Long, List<GeomEntry>> stagedEntries = new HashMap<>();
+        final Map<Long, SourceProgress> sourceProgress = new Long2ObjectOpenHashMap<>();
+        final Map<Long, List<GeomEntry>> stagedEntries = new Long2ObjectOpenHashMap<>();
         final VoxyLodTransition transition;
         final Set<RtSectionTable.SectionGeom> owned =
                 Collections.newSetFromMap(new IdentityHashMap<>());
@@ -1970,11 +1975,11 @@ public final class RtDistantHorizonsTerrain {
             this.table = table;
             this.volumes = volumes;
             this.ownershipOffset = ownershipOffset;
-            HashMap<Long, ArrayList<GeomEntry>> grouped = new HashMap<>();
+            Map<Long, ArrayList<GeomEntry>> grouped = new Long2ObjectOpenHashMap<>();
             for (GeomEntry entry : entries) {
                 grouped.computeIfAbsent(entry.sourceKey, ignored -> new ArrayList<>()).add(entry);
             }
-            HashMap<Long, SourceState> sourceStates = new HashMap<>(grouped.size() * 2);
+            Map<Long, SourceState> sourceStates = new Long2ObjectOpenHashMap<>(grouped.size());
             for (Map.Entry<Long, ArrayList<GeomEntry>> group : grouped.entrySet()) {
                 List<GeomEntry> sourceEntries = List.copyOf(group.getValue());
                 boolean complete = sourceSetComplete || sourceEntries.getFirst().volume != null;
@@ -1990,7 +1995,7 @@ public final class RtDistantHorizonsTerrain {
                 // DH checkpoints may contain partial sources; Voxy publishes only complete branches.
                 sourceStates.put(group.getKey(), new SourceState(version, sourceEntries));
             }
-            this.sources = Map.copyOf(sourceStates);
+            this.sources = Collections.unmodifiableMap(sourceStates);
             this.coverage = new VoxyCoverageIndex(entries.stream().map(e->e.volume).filter(java.util.Objects::nonNull).toList());
         }
 

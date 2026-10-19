@@ -14,6 +14,7 @@ final class VoxyLodTransition {
         Bounds bounds() { return new Bounds(x, y, z, width); }
     }
     private record Bounds(int x, int y, int z, int width) {
+        @Override public int hashCode(){return VoxySourceOwnership.hash(x,y,z,width);}
         Bounds parent() {
             int w = Math.multiplyExact(width, 2);
             return new Bounds(Math.floorDiv(x, w) * w, Math.floorDiv(y, w) * w,

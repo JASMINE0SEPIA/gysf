@@ -4,7 +4,9 @@ import java.util.*;
 
 /** Render-thread octree lookup; queries visit only the requested cube, not the whole view. */
 final class VoxySourceLookup {
-    private record Cube(int x,int y,int z,int width) {}
+    private record Cube(int x,int y,int z,int width) {
+        @Override public int hashCode(){return VoxySourceOwnership.hash(x,y,z,width);}
+    }
     private final Map<Cube,Long> byBounds=new HashMap<>();
     private final Map<Long,Cube> byKey=new HashMap<>();
 

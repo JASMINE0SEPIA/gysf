@@ -18,7 +18,7 @@ final class VoxySourceOwnership {
         while (capacity < Math.multiplyExact(volumes.size(), 2)) capacity = Math.multiplyExact(capacity, 2);
         mask = capacity - 1;
         slots = new int[Math.multiplyExact(capacity, 4)];
-        Set<Long> keys = new HashSet<>();
+        Set<Long> keys = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
         for (var v : volumes) {
             if (v.width() < 32 || v.width() > 512 || !keys.add(v.key()))
                 throw new IllegalArgumentException("Invalid or duplicate Voxy ownership source");

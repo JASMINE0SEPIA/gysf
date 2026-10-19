@@ -5,6 +5,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import java.lang.reflect.*;
 import java.nio.LongBuffer;
 import java.util.*;
+import it.unimi.dsi.fastutil.longs.*;
 
 /** Version-checked reflection stays at the optional mod boundary; mesh workers read owned snapshots. */
 final class VoxySceneReader {
@@ -20,7 +21,7 @@ final class VoxySceneReader {
     private long currentEpoch = Long.MIN_VALUE;
     private final VoxyMeshCache meshCache = new VoxyMeshCache(256L << 20);
     private long cacheHits, returnHits;
-    private final Map<Long, Cached> cache = new HashMap<>();
+    private final Long2ObjectOpenHashMap<Cached> cache = new Long2ObjectOpenHashMap<>();
     private List<DistantHorizonsCompat.LodMesh> published = List.of();
     private long atlasView;
     private Object atlasOwner=new Object();
@@ -72,7 +73,7 @@ final class VoxySceneReader {
             previousModels=nextModels; previousColours=nextColours;
         }
         ArrayList<DistantHorizonsCompat.LodMesh> result=new ArrayList<>();
-        Set<Long> keep=new HashSet<>();
+        LongOpenHashSet keep=new LongOpenHashSet();
         for(Object mesh:(List<?>)meshes.invoke(scene)) {
             long id=key.getLong(mesh), revision=meshRevision.getLong(mesh);
             keep.add(id);

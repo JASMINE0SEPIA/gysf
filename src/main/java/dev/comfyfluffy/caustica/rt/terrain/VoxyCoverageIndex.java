@@ -4,7 +4,9 @@ import java.util.*;
 
 /** Spatial membership of complete, currently published Voxy source volumes. No GPU owners retained. */
 final class VoxyCoverageIndex {
-    private record Cube(int x,int y,int z,int width) {}
+    private record Cube(int x,int y,int z,int width) {
+        @Override public int hashCode(){return VoxySourceOwnership.hash(x,y,z,width);}
+    }
     private final Set<Cube> cubes;
     private final int maximum;
     VoxyCoverageIndex(Collection<VoxyLodTransition.Volume> volumes) {
