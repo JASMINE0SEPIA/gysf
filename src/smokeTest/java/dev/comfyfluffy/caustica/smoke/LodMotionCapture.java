@@ -91,7 +91,14 @@ public final class LodMotionCapture {
         } else if(phase==4 && !lod.hasPendingBuilds() && !VoxyCompat.refinementPending()) {
             if(lod.memoryDistanceLimit()!=0 || lod.streamingStats().get("viewCancellations")!=0)
                 throw new IllegalStateException("Motion replay lost full range or cancelled camera work");
-            states.put("final",Map.of("streaming",lod.streamingStats(),"resident",lod.residentSectionCount()));
+            states.put("final",Map.of("streaming",lod.streamingStats(),"resident",lod.residentSectionCount(),
+                    "sources",VoxyCompat.texturedMeshCount(),"temporaryDistance",lod.memoryDistanceLimit(),
+                    "ingest",VoxyCompat.ingestEnabled(),"rtFrames",RtComposite.frameCounter()));
+            net.minecraft.client.Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(),image->{
+                try {image.writeToFile(Path.of("motion-restored.png"));}
+                catch(java.io.IOException failure){throw new java.io.UncheckedIOException(failure);}
+                finally {image.close();}
+            });
             try {
                 Files.writeString(Path.of("motion-frames.csv"),rows);
                 Files.writeString(Path.of("motion-results.json"),new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(states));
