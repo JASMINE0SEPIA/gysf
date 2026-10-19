@@ -100,84 +100,27 @@ final class RtWeatherCaptureTest {
         assertTrue(src.contains("NaN"), "the centre-cell guard must explain the NaN/BLAS hazard");
     }
 
-    /**
-     * The drops must last exactly as long as the storm — no dead zone at either end.
-     *
-     * <p>Everything else in a storm follows vanilla's rain level directly, most visibly the splash
-     * particles on the ground, which appear the moment it leaves zero. An earlier version held the
-     * columns back until the level passed 0.18 so the sky would grey first; because the ramp is
-     * symmetric that also removed the last stretch, and the columns ended up arriving ~1.7s late and
-     * leaving ~1.7s early against the splashes — rain on the ground with none in the air.
-     *
-     * <p>Contrast is now handled by the opacity floor instead of by suppression, so the only rain level
-     * that draws nothing is a genuine zero.
-     */
     @Test
-    void dropsSpanTheWholeStormRatherThanStartingLate() {
-        assertEquals(0.0f, visualIntensity(0.0f), 1.0e-6f, "no storm at all means no drops");
-        assertEquals(1.0f, visualIntensity(1.0f), 1.0e-6f, "a full storm is at full strength");
-
-        // The instant the storm exists the drops must exist too, at a readable opacity.
-        assertTrue(visualIntensity(1.0e-4f) >= MIN_COLUMN_OPACITY,
-                "the first frame of the storm must already draw, or the columns lag the splashes");
-        assertTrue(visualIntensity(0.05f) >= MIN_COLUMN_OPACITY,
-                "an early ramp must draw: this is where the old dead zone silently deleted the rain");
-
-        // Monotonic in between, so the ramp never flickers.
-        float previous = -1.0f;
-        for (int i = 0; i <= 100; i++) {
-            float value = visualIntensity(i / 100.0f);
-            assertTrue(value >= previous, "visual intensity must be monotonic in the rain level");
-            previous = value;
-        }
-
-        // The floor must not flatten the ramp into a constant — the storm still visibly builds.
-        assertTrue(visualIntensity(1.0f) - visualIntensity(1.0e-4f) > 0.5f,
-                "a full downpour must look substantially heavier than the first drops");
-
-        // And it must stay a floor rather than a boost: never brighter than vanilla's own curve.
-        for (int i = 0; i <= 100; i++) {
-            assertTrue(visualIntensity(i / 100.0f) <= 1.0f + 1.0e-6f,
-                    "intensity must never exceed a full storm");
-        }
+    void rainStartsAndEndsContinuouslyWithoutAnOpacityFloor() {
+        assertEquals(0f, RtWeatherCapture.visualIntensity(0f));
+        assertEquals(0.0001f, RtWeatherCapture.visualIntensity(0.0001f), 1e-7f);
+        assertEquals(0.05f, RtWeatherCapture.visualIntensity(0.05f), 1e-7f);
+        assertEquals(1f, RtWeatherCapture.visualIntensity(1f));
     }
 
-    /**
-     * The column opacity floor must clear the shader's alpha cutoff at full density.
-     *
-     * <p>The floor exists so a column is never drawn wispy, but it is only meaningful if a column at the
-     * floor actually survives {@code ENTITY_ALPHA_CUTOFF}. If it did not, the floor would be decorative
-     * and the drops would still wait for the ramp to lift them over the cutoff — reintroducing exactly
-     * the lag it is meant to remove.
-     */
     @Test
-    void theOpacityFloorClearsTheAlphaCutoff() {
-        // Nearest column, full density: alpha = maxAlpha * intensity, and the drop core's texel is ~1.
-        float nearestAtStormStart = 1.0f * visualIntensity(1.0e-4f);
-        assertTrue(nearestAtStormStart >= MIN_VISIBLE_ALPHA,
-                "a column at the opacity floor must survive the cutout, not be culled as invisible");
-
-        // Snow's lower max alpha must clear it too, or snow alone would lag the storm.
-        float snowAtStormStart = 0.8f * visualIntensity(1.0e-4f);
-        assertTrue(snowAtStormStart >= MIN_VISIBLE_ALPHA,
-                "snow columns must also draw from the storm's first frame");
-    }
-
-    /** Mirrors {@code RtWeatherCapture.MIN_COLUMN_OPACITY}. */
-    private static final float MIN_COLUMN_OPACITY = 0.35f;
-    /** Mirrors {@code RtWeatherCapture.MIN_VISIBLE_ALPHA}. */
-    private static final float MIN_VISIBLE_ALPHA = 0.1f;
-
-    /** Mirrors {@code RtWeatherCapture.visualIntensity}. */
-    private static float visualIntensity(float rainLevel) {
-        float t = Math.max(0.0f, Math.min(1.0f, rainLevel));
-        if (t <= 0.0f) {
-            return 0.0f;
+    void intensityPreservesVanillaRampAndClampsOnlyOutsideItsDomain() {
+        assertEquals(0f, RtWeatherCapture.visualIntensity(-1f));
+        assertEquals(1f, RtWeatherCapture.visualIntensity(2f));
+        float previous = 0f;
+        for (int step = 0; step <= 100; step++) {
+            float input = step / 100f;
+            float actual = RtWeatherCapture.visualIntensity(input);
+            assertEquals(input, actual, 1e-7f);
+            assertTrue(actual >= previous);
+            previous = actual;
         }
-        float eased = t * t * (3.0f - 2.0f * t);
-        return MIN_COLUMN_OPACITY + eased * (1.0f - MIN_COLUMN_OPACITY);
     }
-
     /**
      * Distance fade must ride the ALPHA lane only.
      *
@@ -336,4 +279,3 @@ final class RtWeatherCaptureTest {
                 "weather capture must fail soft and log once rather than kill the RT frame");
     }
 }
-
