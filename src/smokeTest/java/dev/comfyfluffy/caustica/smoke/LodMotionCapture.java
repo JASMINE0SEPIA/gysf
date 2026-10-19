@@ -74,6 +74,7 @@ public final class LodMotionCapture {
         var lod=RtDistantHorizonsTerrain.INSTANCE;
         long now=System.nanoTime();
         if(phase<0 && positioned && worldTicks>900 && !lod.hasPendingBuilds() && lod.residentSectionCount()>0) {
+            if(!client.player.isSpectator())throw new IllegalStateException("Motion replay setup commands did not enter spectator mode");
             if(Boolean.getBoolean("gysf.smoke.motionJfr"))startRecording();
             startPhase(now);
         } else if(phase>=0 && phase<=3) {

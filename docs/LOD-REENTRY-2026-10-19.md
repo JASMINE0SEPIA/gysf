@@ -153,3 +153,101 @@ The old 0.7.5 JAR is backed up under this stage's `previous-mods/` directory.
 All 90 pre-test inventory entries matched before replacement; afterwards the
 73 protected non-mod files and other 16 mod-folder files retain their hashes.
 The provider, Sodium, original save/cache and configuration were not changed.
+
+## gysf 0.7.7: frame pacing during motion
+
+The player reported several intermittent stalls every five seconds after 0.7.6.
+The active player log confirms frequent plan retargets and progressive proxy
+publication while moving, without native memory deferrals. Those log events
+alone are not timings. `LodMotionCapture` therefore records real rendered-frame
+cadence during a deterministic spectator path, separately from generated
+presentations; opt-in `RtFrameStats` stages and JFR execution samples identify
+the work inside the slow frames.
+
+The 0.7.6 baseline with identical timing instrumentation reproduces 220–330 ms
+of render-thread LOD work in individual motion frames, often with zero reported
+GC pause. JFR places 599 render-thread samples in `sourceBatchReady` stacks and
+422 in `VoxySourceOwnership.activate` stacks. A retarget could drain thousands of
+reused/empty batches in one frame, each repeatedly scanning the entire published
+volume and geometry collections. Publication also scanned all next volumes for
+each candidate cache source. Structured spatial keys caused additional slow
+lookups and immutable hash-table construction.
+
+The fix preserves the existing world epochs, source versions and GPU retirement
+rules:
+
+* Source handoff queries indexed octree bounds and per-source batch keys. Coarse
+  ancestors remain fallback until complete finer sources can safely replace them;
+  empty owners still clip stale geometry. Cache eligibility uses bounded ancestor
+  lookups rather than scanning the next view for every old source.
+* Cached and empty batch admission cooperatively yields after about 2 ms. This
+  budget does not preempt an individual operation or cap total frame time. The
+  16-batch GPU/packing window is unchanged.
+* CPU LRU and source maps use mixed primitive-key hash tables. Cube keys mix
+  their spatial bits before hashing. Published source maps remain read-only
+  snapshots, without the expensive `Map.copyOf` layout for these structured keys.
+* Intermediate Voxy publications coalesce for at least 100 ms when a proxy is
+  already visible. Initial, final and required retirement checkpoints can still
+  publish immediately. The current complete fallback stays visible while the
+  next table is prepared.
+
+The controlled before/after runs use physical Greenfield copies, 1,024-block LOD
+range, six near chunks, 1600×1000, the same reconstruction/frame-generation
+configuration, JFR and CPU timing enabled, and Vulkan validation disabled for
+the cadence comparison. Each phase lasts about 20 seconds. These are real-frame
+intervals including presentation/waits, not per-pass GPU timings or monitor
+presentation measurements. The result is specific to this RTX 5060 Laptop GPU
+and fixture; it is not a universal FPS improvement.
+
+| Input phase | Baseline p99 | Final candidate p99 | Frames over 100 ms, before → after |
+| --- | ---: | ---: | ---: |
+| Stationary | 37.18 ms | 34.37 ms | 0 → 0 |
+| Continuous turn | 165.65 ms | 98.71 ms | 13 → 5 |
+| Continuous movement | 251.02 ms | 61.16 ms | 40 → 0 |
+| Movement and turn | 93.03 ms | 65.02 ms | 3 → 1 |
+
+Across the three motion phases, intervals over 100 ms fall from 56 to six and
+over 200 ms from nine to zero. The remaining worst combined-input frame is
+114.16 ms. Its CPU trace includes 91.52 ms in entity capture and 5.61 ms in LOD
+service; this is not proof that every remaining stall has the same cause. The
+intermediate first candidate and the final candidate show run-to-run variation,
+especially during turns, so no stable percentage FPS claim is made.
+
+`scripts/Analyze-LodMotion.py <run-directory> ...` summarizes the retained
+`motion-frames.csv` files and rejects missing phases, repeated rendered frames
+and incomplete/cancelled LOD rebuilds. Local evidence is under
+`artifacts/2026-10-19/lod-pacing/`: baseline, candidate, candidate2 logs, JFRs,
+per-frame CPU CSVs and `cadence-comparison.json`. All three cadence runs finish
+with their build queues drained, the requested far range intact, native LOD
+allocations at zero on shutdown and no memory deferrals. The final build passes
+264 Java tests, the ABI check and packaged-mod checks; all 407 production class
+hashes and 32 SPIR-V hashes match the tested runtime.
+
+The exact 0.7.7 production code passes the synchronization-validation replay in
+`lod-streaming/pacing-reentry-final.log`: 32 → six near chunks, disconnect/reopen,
+turns, 512-block travel/return and live block placement/removal. It finishes with
+5,349 resident batches and 3,623 sampled far sections, no camera cancellations,
+no pending builds and no far-distance reduction. Native LOD allocations return
+to zero (2,934,686,240-byte peak, one driver-headroom deferral in the high-near
+phase). The placed GPU source appears and the removed revision disappears.
+
+`run-player-validation-commands` is a fresh physical copy of the player's current
+`Nuovo mondo`, with the current mod/resource-pack/config set and three generated
+frames per real frame. Dynamic FPS is omitted only in this copy. The copy's
+commands are enabled for spectator setup; the harness rejects a failed setup.
+The earlier `player-validation` run did not enter spectator mode because commands
+were disabled and is excluded from route acceptance. The corrected run passes
+continuous turns/movement, full-range recovery and Vulkan/NGX synchronization
+validation. It finishes with 6,311 source meshes, 6,225 resident batches, empty
+queues, zero camera cancellations and zero temporary distance reduction. Native
+LOD allocations return to zero (2,451,868,352-byte peak, no deferrals). Its final
+terrain screenshot was inspected. This validation run is not included in the
+cadence comparison because its scene, settings and validation overhead differ.
+
+The verified 0.7.7 JAR was deployed to the player's `26.3/mods` directory with
+SHA-256 `BA117B3D6A20DEB0AD9B29FD190D4C5BCC4E4B77BDBA7544EF31B1F11978F212`.
+The previous 0.7.6 JAR is backed up in `lod-pacing/previous-mods/`. All 165
+pre-test inventory entries match before replacement; the other 16 mod files and
+148 protected save/cache/configuration files retain their hashes afterwards.
+Sodium and the Voxy provider are unchanged. Normal player-session frame profiling
+remains disabled; the profiling replay lives only in the development source set.
