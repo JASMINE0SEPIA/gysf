@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync,[switch]$RequireWaterField,[switch]$RequireWaterGuides,[switch]$RequireGpuTimings,[switch]$RequireWaterBoundsCache,[switch]$RequireNearPressure,[switch]$RequireLodReentry,
+param([Parameter(Mandatory)][string]$Path,[switch]$RequireNgxClearSync,[switch]$RequireWaterField,[switch]$RequireWaterGuides,[switch]$RequireGpuTimings,[switch]$RequireWaterBoundsCache,[switch]$RequireNearPressure,[switch]$RequireLodReentry,[switch]$RequireWeather,
       [ValidateRange(1,64)][int]$GuideCaptureCount=4)
 $ErrorActionPreference='Stop'
 $content=Get-Content -LiteralPath $Path -Raw
@@ -8,7 +8,12 @@ $reports=Select-String -LiteralPath $Path -Pattern $validation
 if($reports) {
     throw "Vulkan validation reports in ${Path}: $($reports.Count). First: $($reports[0].Line)"
 }
-if($RequireLodReentry) {
+if($RequireWeather) {
+    $weather=[regex]::Matches($content,'GYSF_WEATHER: PASS captures=(\d+) columns=(\d+) rain=0(?:\.0)?\.\.1(?:\.0)? frames=(\d+)')
+    if($weather.Count -ne 1 -or [int]$weather[0].Groups[1].Value -ne 7 -or [int]$weather[0].Groups[2].Value -lt 20 -or [long]$weather[0].Groups[3].Value -lt 300) {
+        throw "Missing completed rain/light/roof replay in $Path"
+    }
+} elseif($RequireLodReentry) {
     $reentry=[regex]::Matches($content,'GYSF_LOD_REENTRY: PASS cold=(true|false) far=(\d+) resident=(\d+) publishedFar=(\d+) ingest=false frames=(\d+)')
     if($reentry.Count -ne 1){throw "Missing unique disk-only LOD reentry PASS marker in $Path"}
     $r=$reentry[0].Groups

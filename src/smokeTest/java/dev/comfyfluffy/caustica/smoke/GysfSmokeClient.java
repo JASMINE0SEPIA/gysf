@@ -63,6 +63,11 @@ public final class GysfSmokeClient implements ClientModInitializer {
     private final WaterDomainSmokeProbe waterDomain=new WaterDomainSmokeProbe();
     private final WaterGuideCapture waterGuides=new WaterGuideCapture();
     @Override public void onInitializeClient() {
+        if (WeatherCapture.locked()) {
+            var capture = new WeatherCapture();
+            ClientTickEvents.END_CLIENT_TICK.register(capture::tick);
+            return;
+        }
         if (Boolean.getBoolean("gysf.smoke.reentry")) {
             var capture = new LodReentryCapture();
             ClientTickEvents.END_CLIENT_TICK.register(capture::tick);
