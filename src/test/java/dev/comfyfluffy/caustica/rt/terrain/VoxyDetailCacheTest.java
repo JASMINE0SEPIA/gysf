@@ -5,6 +5,12 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 final class VoxyDetailCacheTest {
+    @Test void onlyMatchingContentCanBypassRebuildingAndStaleFallbackRemainsOwned() {
+        var cache=new VoxyDetailCache<String>();var source=entry(1,5,100);cache.put(source,200);
+        assertNull(cache.takeMatching(1,6));assertEquals(100,cache.bytes());
+        assertSame(source,cache.takeMatching(1,5));assertEquals(0,cache.bytes());
+        assertNull(cache.takeMatching(1,5));
+    }
     private static VoxyDetailCache.Entry<String> entry(long key,long revision,long bytes) {
         return new VoxyDetailCache.Entry<>(new VoxyLodTransition.Volume(key,(int)key*32,0,0,32),
                 revision,List.of("batch1-"+key,"batch2-"+key),bytes);

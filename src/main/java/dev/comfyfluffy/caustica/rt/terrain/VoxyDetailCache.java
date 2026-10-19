@@ -14,6 +14,10 @@ final class VoxyDetailCache<T> {
     synchronized Entry<T> take(long key) {
         var entry=entries.remove(key);if(entry!=null)bytes-=entry.bytes();return entry;
     }
+    synchronized Entry<T> takeMatching(long key,long revision) {
+        var entry=entries.get(key);
+        return entry!=null&&entry.revision()==revision ? take(key) : null;
+    }
     synchronized List<Entry<T>> put(Entry<T> entry,long limit) {
         if(limit<0)throw new IllegalArgumentException("Negative cache limit");
         List<Entry<T>> evicted=new ArrayList<>();

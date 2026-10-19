@@ -16,12 +16,14 @@ final class VoxySceneReader {
     private boolean pendingRefinement;
     private Object previous, previousModels;
     private VoxySceneData.Palette palette;
-    private long currentEpoch = Long.MIN_VALUE, version;
+    private long currentEpoch = Long.MIN_VALUE;
+    private final VoxyMeshCache meshCache = new VoxyMeshCache(256L << 20);
+    private long cacheHits, returnHits;
     private final Map<Long, Cached> cache = new HashMap<>();
     private List<DistantHorizonsCompat.LodMesh> published = List.of();
     private long atlasView;
     private Object atlasOwner=new Object();
-    private record Cached(long revision, DistantHorizonsCompat.LodMesh mesh) {}
+    private record Cached(long version, DistantHorizonsCompat.LodMesh mesh) {}
 
     VoxySceneReader(Class<?> bridge) throws ReflectiveOperationException {
         poll = bridge.getMethod("pollScene", double.class, double.class, double.class);
@@ -65,7 +67,7 @@ final class VoxySceneReader {
                         fluid,water,VoxySceneData.isGlass(v[7],fluid),state.getLightEmission());
             }
             palette=new VoxySceneData.Palette(entries,(int[])colours.invoke(scene));
-            previousModels=nextModels; cache.clear();
+            previousModels=nextModels;
         }
         ArrayList<DistantHorizonsCompat.LodMesh> result=new ArrayList<>();
         Set<Long> keep=new HashSet<>();
@@ -73,7 +75,11 @@ final class VoxySceneReader {
             long id=key.getLong(mesh), revision=meshRevision.getLong(mesh);
             keep.add(id);
             Cached cached=cache.get(id);
-            if(cached==null || cached.revision!=revision) {
+            VoxyMeshCache.Entry content=meshCache.get(id,revision,palette);
+            if(content!=null) {
+                cacheHits++;
+                if(cached==null)returnHits++;
+            } else {
                 LongBuffer buffer=(LongBuffer)quads.invoke(mesh);
                 long[] packed=new long[buffer.remaining()]; buffer.get(packed);
                 int lod=level.getInt(mesh);
@@ -82,10 +88,12 @@ final class VoxySceneReader {
                     LongBuffer values=(LongBuffer)fluidHeights.invoke(mesh);
                     precise=new long[values.remaining()]; values.get(precise);
                 }
-                var data=new VoxySceneData.Mesh(packed,palette,lod,precise);
-                var copy=new DistantHorizonsCompat.LodMesh(id,++version,(int)ox.invoke(mesh),(int)oy.invoke(mesh),
-                        (int)oz.invoke(mesh),(int)size.invoke(mesh),1<<lod,new byte[0],new byte[0],data);
-                cached=new Cached(revision,copy); cache.put(id,cached);
+                content=meshCache.put(id,revision,packed,precise,lod,palette);
+            }
+            if(cached==null || cached.version!=content.version()) {
+                var copy=new DistantHorizonsCompat.LodMesh(id,content.version(),(int)ox.invoke(mesh),(int)oy.invoke(mesh),
+                        (int)oz.invoke(mesh),(int)size.invoke(mesh),1<<content.mesh().level(),new byte[0],new byte[0],content.mesh());
+                cached=new Cached(content.version(),copy); cache.put(id,cached);
             }
             // Empty leaves are coverage too: they must retire previously visible solid geometry.
             result.add(cached.mesh);
@@ -100,8 +108,10 @@ final class VoxySceneReader {
     long sceneEpoch() { return currentEpoch; }
     boolean refinementPending() { return pendingRefinement; }
     Object atlasOwner() { return atlasOwner; }
+    Map<String,Long> cacheStats() { return Map.of("hits",cacheHits,"returnHits",returnHits,
+            "bytes",meshCache.bytes(),"sources",(long)meshCache.size()); }
     void clear() {
-        cache.clear(); previous=previousModels=null; palette=null; published=List.of();
+        cache.clear(); meshCache.clear(); previous=previousModels=null; palette=null; published=List.of();
         currentEpoch=Long.MIN_VALUE; atlasView=0; atlasOwner=new Object();
         pendingRefinement=false;
     }

@@ -1,6 +1,9 @@
 package dev.comfyfluffy.caustica.compat;
 
 import net.minecraft.world.level.block.state.BlockState;
+import java.util.Arrays;
+import java.util.BitSet;
+import java.util.Objects;
 
 /** Immutable CPU data copied from optional API 5; no provider types or native resources escape here. */
 public final class VoxySceneData {
@@ -39,6 +42,7 @@ public final class VoxySceneData {
         private final long[] fluidHeights;
         private final Palette palette;
         private final int level;
+        private final int[] usedModels, usedColours;
         public Mesh(long[] quads, Palette palette, int level) {
             this(quads,palette,level,new long[0]);
         }
@@ -48,6 +52,16 @@ public final class VoxySceneData {
                 throw new IllegalArgumentException("Voxy fluid heights must match quad order");
             this.quads = quads.clone(); this.palette = palette; this.level = level;
             this.fluidHeights = fluidHeights.clone();
+            BitSet modelIds = new BitSet(), colourIds = new BitSet();
+            for (long quad : quads) {
+                int id = (int)(quad >>> 26) & 65535;
+                modelIds.set(id);
+                Model model = palette.model(id);
+                if ((model.flags() & 2) != 0 && model.tint() >= 0)
+                    colourIds.set(model.tint() + ((int)(quad >>> 46) & 511));
+            }
+            usedModels = modelIds.stream().toArray();
+            usedColours = colourIds.stream().toArray();
         }
         public int quadCount() { return quads.length; }
         public long quad(int index) { return quads[index]; }
@@ -55,5 +69,15 @@ public final class VoxySceneData {
         public Model model(int id) { return palette.model(id); }
         public int colour(int index) { return palette.colour(index); }
         public int level() { return level; }
+        long retainedBytes() { return 96L + 8L * (quads.length + fluidHeights.length) + 4L * (usedModels.length + usedColours.length); }
+        boolean sameContent(long[] packed, long[] fluids, int lod) {
+            return level == lod && Arrays.equals(quads, packed) && Arrays.equals(fluidHeights, fluids);
+        }
+        boolean compatiblePalette(Palette next) {
+            if (palette == next) return true;
+            for (int id : usedModels) if (!Objects.equals(palette.models[id], next.models[id])) return false;
+            for (int id : usedColours) if (palette.colour(id) != next.colour(id)) return false;
+            return true;
+        }
     }
 }

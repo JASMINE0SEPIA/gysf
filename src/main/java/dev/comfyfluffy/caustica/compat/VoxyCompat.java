@@ -73,6 +73,9 @@ public final class VoxyCompat {
     public static boolean refinementPending() {
         return API!=null && API.textured!=null && API.textured.refinementPending();
     }
+    public static java.util.Map<String,Long> snapshotCacheStats() {
+        return API!=null && API.textured!=null ? API.textured.cacheStats() : java.util.Map.of();
+    }
     public static int texturedMeshCount() {
         int count=0; for(var mesh:snapshot) if(mesh.textured()!=null) count++;
         return count;

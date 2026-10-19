@@ -124,6 +124,7 @@ public final class RtDistantHorizonsTerrain {
     /** Latest selection waits for the current bounded batch, never invalidating its world epoch. */
     private CpuCompleted readyPlan;
     private long livePlanRetargets, viewPlanCancellations;
+    private long residentCacheReuses;
     private boolean packPending;
     private boolean bootstrapComplete;
     private final AtomicBoolean manualRefreshRequested = new AtomicBoolean();
@@ -425,7 +426,8 @@ public final class RtDistantHorizonsTerrain {
     /** Development replay counters; geometry remains owned by the render thread. */
     public Map<String, Long> streamingStats() {
         return Map.of("retargets", livePlanRetargets, "viewCancellations", viewPlanCancellations,
-                "epoch", epoch, "remaining", buildSession == null ? 0L : (long) buildSession.remaining.size());
+                "epoch", epoch, "remaining", buildSession == null ? 0L : (long) buildSession.remaining.size(),
+                "residentCacheReuses", residentCacheReuses);
     }
 
     private void startCpuBuild(int originX, int originY, int originZ, int proxyRadius, long taskEpoch,
@@ -932,8 +934,16 @@ public final class RtDistantHorizonsTerrain {
             requestRetry();
             return;
         }
-        if (voxy) plan = reuseCompletedBatches(plan, previousSession);
-        BuildSession replacement = new BuildSession(taskEpoch, revision, new ArrayDeque<>(plan), materials, current);
+        ReusedPlan resolved = voxy ? reuseCompletedBatches(plan, previousSession) : new ReusedPlan(plan,Set.of());
+        plan = resolved.plan;
+        BuildSession replacement;
+        try {
+            replacement = new BuildSession(taskEpoch, revision, new ArrayDeque<>(plan), materials, current);
+        } catch (Throwable failure) {
+            for (var geom : resolved.transferred) geom.destroy();
+            throw failure;
+        }
+        replacement.owned.addAll(resolved.transferred);
         if (previousSession != null) {
             replacement.lastBuild = previousSession.lastBuild;
             Set<RtSectionTable.SectionGeom> reused = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -961,7 +971,8 @@ public final class RtDistantHorizonsTerrain {
         serviceBuildSession(ctx);
     }
 
-    private List<PlannedBatch> reuseCompletedBatches(List<PlannedBatch> plan, BuildSession session) {
+    private record ReusedPlan(List<PlannedBatch> plan, Set<RtSectionTable.SectionGeom> transferred) {}
+    private ReusedPlan reuseCompletedBatches(List<PlannedBatch> plan, BuildSession session) {
         Map<Long, GeomEntry> available = new HashMap<>();
         if (current != null) for (var entry : current.entries) available.put(entry.batchKey, entry);
         if (session != null) {
@@ -973,12 +984,24 @@ public final class RtDistantHorizonsTerrain {
             });
         }
         List<PlannedBatch> result = new ArrayList<>(plan.size());
+        Set<RtSectionTable.SectionGeom> transferred = Collections.newSetFromMap(new IdentityHashMap<>());
         for (var batch : plan) {
             var entry = available.get(batch.batchKey);
+            if ((entry == null || entry.sourceVersion != batch.sourceVersion) && batch.volume != null) {
+                var cached = fineCache.takeMatching(batch.sourceKey,batch.sourceVersion);
+                if (cached != null) {
+                    for (var cachedBatch : cached.batches()) {
+                        available.put(cachedBatch.batchKey,cachedBatch);
+                        transferred.add(cachedBatch.geom);
+                    }
+                    residentCacheReuses++;
+                    entry=available.get(batch.batchKey);
+                }
+            }
             result.add(entry != null && entry.sourceKey == batch.sourceKey && entry.sourceVersion == batch.sourceVersion
                     ? PlannedBatch.reuse(entry) : batch);
         }
-        return result;
+        return new ReusedPlan(result,transferred);
     }
 
     private static long sourceBytes(List<GeomEntry> entries) {

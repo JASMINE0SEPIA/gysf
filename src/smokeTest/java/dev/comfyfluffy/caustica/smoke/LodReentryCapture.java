@@ -154,6 +154,7 @@ public final class LodReentryCapture {
         values.put("ingest", VoxyCompat.ingestEnabled());
         values.put("elapsedSeconds", (System.nanoTime() - worldStartedNanos) / 1e9);
         values.put("streaming", RtDistantHorizonsTerrain.INSTANCE.streamingStats());
+        values.put("snapshotCache", VoxyCompat.snapshotCacheStats());
         try {
             values.put("backend", Class.forName("me.cortex.voxy.client.core.backend.VoxyGraphicsBackend")
                     .getMethod("statusLine").invoke(null));
