@@ -33,22 +33,30 @@ def slangCompiler = providers.gradleProperty('slangcPath').orElse(
     providers.environmentVariable('VULKAN_SDK').map { "${it}/Bin/slangc.exe" }
 ).orElse('slangc')
 
-['vertex': 'vertexMain', 'fragment': 'fragmentMain'].each { stage, entry ->
-    def suffix = stage == 'vertex' ? 'vert' : 'frag'
-    def output = generatedShaders.map { it.file("assets/gysf/shaders/debug/world_depth.${suffix}.spv") }
-    tasks.register("compileDepth${stage.capitalize()}", Exec) {
-        inputs.file('shaders/debug/world_depth.slang')
+def shaderJobs = [
+    [name: 'DepthVertex', source: 'world_depth', output: 'world_depth.vert', stage: 'vertex', entry: 'vertexMain'],
+    [name: 'DepthFragment', source: 'world_depth', output: 'world_depth.frag', stage: 'fragment', entry: 'fragmentMain'],
+    [name: 'SurfaceVertex', source: 'terrain_surface', output: 'surface_single.vert', stage: 'vertex', entry: 'vertexMain', defines: ['MULTIDRAW=0']],
+    [name: 'SurfaceMultidrawVertex', source: 'terrain_surface', output: 'surface_multi.vert', stage: 'vertex', entry: 'vertexMain', defines: ['MULTIDRAW=1']],
+    [name: 'SurfaceFragment', source: 'terrain_surface', output: 'terrain_surface.frag', stage: 'fragment', entry: 'fragmentMain']
+]
+shaderJobs.each { job ->
+    def output = generatedShaders.map { it.file("assets/gysf/shaders/debug/${job.output}.spv") }
+    tasks.register("compile${job.name}", Exec) {
+        inputs.file("shaders/debug/${job.source}.slang")
         inputs.property('slangCompiler', slangCompiler)
+        inputs.property('shaderJob', job)
         outputs.file(output)
         executable slangCompiler.get()
-        args file('shaders/debug/world_depth.slang').absolutePath,
-            '-entry', entry, '-stage', stage, '-target', 'spirv', '-profile', 'spirv_1_5',
+        args file("shaders/debug/${job.source}.slang").absolutePath,
+            '-entry', job.entry, '-stage', job.stage, '-target', 'spirv', '-profile', 'spirv_1_5',
             '-matrix-layout-column-major', '-o', output.get().asFile.absolutePath
+        (job.defines ?: []).each { define -> args '-D', define }
         doFirst { output.get().asFile.parentFile.mkdirs() }
     }
 }
 
-sourceSets.main.resources.srcDir(files(generatedShaders).builtBy('compileDepthVertex', 'compileDepthFragment'))
+sourceSets.main.resources.srcDir(files(generatedShaders).builtBy(shaderJobs.collect { "compile${it.name}" }))
 
 processResources {
     inputs.property 'version', project.version
