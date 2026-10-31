@@ -10,9 +10,20 @@ import org.lwjgl.system.MemoryUtil;
 
 import java.io.IOException;
 import java.nio.ByteOrder;
+import java.util.Map;
 
 /** Build-time Slang binaries; the host still owns reflection, bindings and pipeline compilation. */
 public final class SlangShaderSource implements ShaderSource {
+    private final Map<String, String> bindingAliases;
+
+    public SlangShaderSource() {
+        this(Map.of());
+    }
+
+    public SlangShaderSource(Map<String, String> bindingAliases) {
+        this.bindingAliases = Map.copyOf(bindingAliases);
+    }
+
     @Override
     public String getShader(Identifier id, ShaderType type) {
         // PipelineBuilder checks for source text before reaching the binary bridge.
@@ -34,7 +45,7 @@ public final class SlangShaderSource implements ShaderSource {
             var code = MemoryUtil.memAlloc(bytes.length).order(ByteOrder.nativeOrder());
             code.put(bytes).flip();
             // SPIRVModule owns this allocation. PipelineBuilder releases it after pipeline compilation.
-            return new SPIRVModule(code, type);
+            return bindingAliases.isEmpty() ? new SPIRVModule(code, type) : new NamedSpirvModule(code, type, bindingAliases);
         } catch (IOException exception) {
             throw new ShaderCompileException("Cannot read Slang binary " + path + ": " + exception.getMessage());
         }
