@@ -6,6 +6,7 @@
   "description": "a shader mod called 光影水反",
   "authors": ["JASMINE"],
   "environment": "client",
+  "mixins": ["gysf.mixins.json"],
   "entrypoints": {
     "client": ["me.jasmine.gysf.GysfClient"]
   },

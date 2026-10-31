@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "me.jasmine.gysf.integration.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "VulkanBackendMixin",
+    "GameRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
