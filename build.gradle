@@ -44,7 +44,11 @@ loom {
             runDir 'run'
             vmArg '--enable-native-access=ALL-UNNAMED'
             vmArg "-Dgysf.debug.gpuProbe=${providers.gradleProperty('gpuProbe').getOrElse('false')}"
+            vmArg "-Dgysf.gpu.localRayQuery=${providers.gradleProperty('localRayQuery').getOrElse('true')}"
             programArgs '--offlineDeveloperMode', '--graphicsBackend', 'VULKAN'
+            if (providers.gradleProperty('gpuValidation').getOrElse('false').toBoolean()) {
+                programArgs '--vulkanValidation'
+            }
             def devWorld = providers.gradleProperty('devWorld')
             if (devWorld.isPresent()) {
                 programArgs '--quickPlaySingleplayer', devWorld.get()

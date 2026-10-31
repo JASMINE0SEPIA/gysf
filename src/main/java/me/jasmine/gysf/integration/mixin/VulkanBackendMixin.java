@@ -3,18 +3,33 @@ package me.jasmine.gysf.integration.mixin;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.mojang.renderpearl.backend.vulkan.VulkanBackend;
+import com.mojang.renderpearl.backend.vulkan.init.FeatureSet;
+import me.jasmine.gysf.gpu.RayQueryDeviceFeatures;
 import me.jasmine.gysf.integration.minecraft.GpuDiagnostics;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.vulkan.VkAllocationCallbacks;
 import org.lwjgl.vulkan.VkDeviceCreateInfo;
 import org.lwjgl.vulkan.VkPhysicalDevice;
+import org.lwjgl.vulkan.VkDevice;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+import java.util.Set;
 
 import static org.lwjgl.vulkan.VK10.VK_SUCCESS;
 
 @Mixin(VulkanBackend.class)
 public abstract class VulkanBackendMixin {
+    @WrapOperation(
+        method = "createDevice(Lcom/mojang/renderpearl/api/device/GpuDebugOptions;)Lcom/mojang/renderpearl/api/device/GpuDevice;",
+        at = @At(value = "INVOKE", target = "Lcom/mojang/renderpearl/backend/vulkan/VulkanFeatureSets;optionalFeatureSets()Ljava/util/Set;")
+    )
+    private static Set<FeatureSet> gysf$includeRayQueryFeatures(Operation<Set<FeatureSet>> original) {
+        return RayQueryDeviceFeatures.includeIn(original.call());
+    }
+
     @WrapOperation(
         method = "createDevice(Lcom/mojang/renderpearl/backend/vulkan/init/FeatureSet;Lcom/mojang/renderpearl/backend/vulkan/VulkanPhysicalDevice;)Lorg/lwjgl/vulkan/VkDevice;",
         at = @At(value = "INVOKE", target = "Lorg/lwjgl/vulkan/VK12;vkCreateDevice(Lorg/lwjgl/vulkan/VkPhysicalDevice;Lorg/lwjgl/vulkan/VkDeviceCreateInfo;Lorg/lwjgl/vulkan/VkAllocationCallbacks;Lorg/lwjgl/PointerBuffer;)I")
@@ -29,5 +44,15 @@ public abstract class VulkanBackendMixin {
             GpuDiagnostics.reportDevice(physicalDevice, createInfo);
         }
         return result;
+    }
+
+    @Inject(
+        method = "createDevice(Lcom/mojang/renderpearl/backend/vulkan/init/FeatureSet;Lcom/mojang/renderpearl/backend/vulkan/VulkanPhysicalDevice;)Lorg/lwjgl/vulkan/VkDevice;",
+        at = @At("RETURN")
+    )
+    private static void gysf$observeDeviceDispatch(CallbackInfoReturnable<VkDevice> ci) {
+        if (GpuDiagnostics.ENABLED) {
+            GpuDiagnostics.reportDeviceDispatch(ci.getReturnValue());
+        }
     }
 }

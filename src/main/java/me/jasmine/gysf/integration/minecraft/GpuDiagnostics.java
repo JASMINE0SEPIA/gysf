@@ -124,6 +124,14 @@ public final class GpuDiagnostics {
         LOGGER.info("GPU probe {} supported={} enabled={}", name, supported, enabled);
     }
 
+    public static void reportDeviceDispatch(VkDevice device) {
+        var capabilities = device.getCapabilities();
+        LOGGER.info("GPU probe LWJGL dispatch accelerationStructure={} rayQuery={} createAccelerationStructure={} buildAccelerationStructures={} bufferDeviceAddress={} rayTracingPipeline={}",
+            capabilities.VK_KHR_acceleration_structure, capabilities.VK_KHR_ray_query,
+            capabilities.vkCreateAccelerationStructureKHR != 0, capabilities.vkCmdBuildAccelerationStructuresKHR != 0,
+            capabilities.vkGetBufferDeviceAddress != 0, capabilities.VK_KHR_ray_tracing_pipeline);
+    }
+
     public static void reportTarget(String stage, RenderTarget target) {
         RenderSystem.assertOnRenderThread();
         var color = target.getColorTexture();
