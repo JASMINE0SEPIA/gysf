@@ -43,7 +43,12 @@ loom {
             client()
             runDir 'run'
             vmArg '--enable-native-access=ALL-UNNAMED'
+            vmArg "-Dgysf.debug.gpuProbe=${providers.gradleProperty('gpuProbe').getOrElse('false')}"
             programArgs '--offlineDeveloperMode', '--graphicsBackend', 'VULKAN'
+            def devWorld = providers.gradleProperty('devWorld')
+            if (devWorld.isPresent()) {
+                programArgs '--quickPlaySingleplayer', devWorld.get()
+            }
         }
     }
 }
