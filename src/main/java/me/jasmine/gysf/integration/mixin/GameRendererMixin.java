@@ -1,8 +1,11 @@
 package me.jasmine.gysf.integration.mixin;
 
 import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.llamalad7.mixinextras.sugar.Local;
+import me.jasmine.gysf.debug.WorldDepthDebug;
 import me.jasmine.gysf.integration.minecraft.GpuDiagnostics;
 import net.minecraft.client.renderer.GameRenderer;
+import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -16,9 +19,11 @@ public abstract class GameRendererMixin {
     @Shadow @Final private RenderTarget mainRenderTarget;
     @Unique private boolean gysf$frameReported;
     @Unique private boolean gysf$worldReported;
+    @Unique private final WorldDepthDebug gysf$depthDebug = new WorldDepthDebug();
 
     @Inject(method = "render()V", at = @At("RETURN"))
     private void gysf$observeFrame(CallbackInfo ci) {
+        gysf$depthDebug.frame();
         if (GpuDiagnostics.ENABLED && !gysf$frameReported) {
             GpuDiagnostics.reportTarget("frame-end (depth is no longer world depth)", mainRenderTarget);
             gysf$frameReported = true;
@@ -29,10 +34,16 @@ public abstract class GameRendererMixin {
         method = "renderLevel()V",
         at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/GameRenderer;render3dHud(Lnet/minecraft/client/renderer/state/level/CameraRenderState;Lnet/minecraft/client/renderer/state/level/PlayerRenderState;Lnet/minecraft/client/renderer/state/OptionsRenderState;Z)V")
     )
-    private void gysf$observeWorldBeforeHand(CallbackInfo ci) {
+    private void gysf$observeWorldBeforeHand(CallbackInfo ci, @Local Matrix4f projectionMatrix) {
         if (GpuDiagnostics.ENABLED && !gysf$worldReported) {
             GpuDiagnostics.reportTarget("world-before-hand", mainRenderTarget);
             gysf$worldReported = true;
         }
+        gysf$depthDebug.render(mainRenderTarget, projectionMatrix);
+    }
+
+    @Inject(method = "close", at = @At("HEAD"))
+    private void gysf$closeDepthDebug(CallbackInfo ci) {
+        gysf$depthDebug.close();
     }
 }

@@ -4,7 +4,9 @@
   "compatibilityLevel": "JAVA_25",
   "client": [
     "VulkanBackendMixin",
-    "GameRendererMixin"
+    "GameRendererMixin",
+    "PipelineBuilderMixin",
+    "KeyboardHandlerMixin"
   ],
   "injectors": {
     "defaultRequire": 1
