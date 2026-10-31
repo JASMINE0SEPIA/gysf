@@ -1,0 +1,49 @@
+plugins {
+    id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+group = project.maven_group
+version = project.mod_version
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(25)
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 25
+    options.encoding = 'UTF-8'
+}
+
+processResources {
+    inputs.property 'version', project.version
+    inputs.property 'minecraft_version', project.minecraft_version
+    inputs.property 'loader_version', project.loader_version
+    filesMatching('fabric.mod.json') {
+        expand inputs.properties
+    }
+}
+
+loom {
+    runs {
+        client {
+            client()
+            runDir 'run'
+            vmArg '--enable-native-access=ALL-UNNAMED'
+            programArgs '--offlineDeveloperMode', '--graphicsBackend', 'VULKAN'
+        }
+    }
+}
