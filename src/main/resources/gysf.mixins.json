@@ -6,7 +6,8 @@
     "VulkanBackendMixin",
     "GameRendererMixin",
     "PipelineBuilderMixin",
-    "KeyboardHandlerMixin"
+    "KeyboardHandlerMixin",
+    "TerrainDrawMixin"
   ],
   "injectors": {
     "defaultRequire": 1

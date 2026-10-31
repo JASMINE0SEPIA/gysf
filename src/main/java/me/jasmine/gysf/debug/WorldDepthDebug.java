@@ -46,6 +46,10 @@ public final class WorldDepthDebug implements AutoCloseable {
         LOGGER.info("World depth debug {} (F8)", requested ? "on" : "off");
     }
 
+    public static void disable() {
+        requested = false;
+    }
+
     /** Poll without blocking normal frames, including frames in menus after leaving a world. */
     public void frame() {
         RenderSystem.assertOnRenderThread();
