@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "gysf",
+  "version": "${version}",
+  "name": "光影水反",
+  "description": "a shader mod called 光影水反",
+  "authors": ["JASMINE"],
+  "environment": "client",
+  "entrypoints": {
+    "client": ["me.jasmine.gysf.GysfClient"]
+  },
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "minecraft": "${minecraft_version}",
+    "java": ">=25"
+  }
+}
