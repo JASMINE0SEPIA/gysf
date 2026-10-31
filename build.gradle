@@ -28,6 +28,28 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
+def generatedShaders = layout.buildDirectory.dir('generated/shaders')
+def slangCompiler = providers.gradleProperty('slangcPath').orElse(
+    providers.environmentVariable('VULKAN_SDK').map { "${it}/Bin/slangc.exe" }
+).orElse('slangc')
+
+['vertex': 'vertexMain', 'fragment': 'fragmentMain'].each { stage, entry ->
+    def suffix = stage == 'vertex' ? 'vert' : 'frag'
+    def output = generatedShaders.map { it.file("assets/gysf/shaders/debug/world_depth.${suffix}.spv") }
+    tasks.register("compileDepth${stage.capitalize()}", Exec) {
+        inputs.file('shaders/debug/world_depth.slang')
+        inputs.property('slangCompiler', slangCompiler)
+        outputs.file(output)
+        executable slangCompiler.get()
+        args file('shaders/debug/world_depth.slang').absolutePath,
+            '-entry', entry, '-stage', stage, '-target', 'spirv', '-profile', 'spirv_1_5',
+            '-matrix-layout-column-major', '-o', output.get().asFile.absolutePath
+        doFirst { output.get().asFile.parentFile.mkdirs() }
+    }
+}
+
+sourceSets.main.resources.srcDir(files(generatedShaders).builtBy('compileDepthVertex', 'compileDepthFragment'))
+
 processResources {
     inputs.property 'version', project.version
     inputs.property 'minecraft_version', project.minecraft_version
