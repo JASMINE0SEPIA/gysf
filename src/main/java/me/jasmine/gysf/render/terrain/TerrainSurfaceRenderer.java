@@ -1,4 +1,4 @@
-package me.jasmine.gysf.debug;
+package me.jasmine.gysf.render.terrain;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
@@ -23,10 +23,10 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
-/** Replaces only the shader on the host's opaque/cutout terrain draws. Owns no meshes or targets. */
-public final class TerrainSurfaceDebug implements AutoCloseable {
+/** Unlit terrain by default, with optional surface diagnostics. Borrows host meshes and targets. */
+public final class TerrainSurfaceRenderer implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger("gysf");
-    private static final String[] MODES = {"off", "raw atlas color", "geometry normals", "grid 16", "grid 8", "host vertex color (tint and shading)"};
+    private static final String[] MODES = {"base color", "raw atlas color", "geometry normals", "grid 16", "grid 8", "functional tint"};
     private static final Map<String, String> HOST_BINDINGS = Map.of(
         "GlobalsData_std140", "Globals", "ProjectionData_std140", "Projection",
         "TerrainData_std140", "TerrainUniform", "SectionData_std140", "ChunkSection"
@@ -34,12 +34,14 @@ public final class TerrainSurfaceDebug implements AutoCloseable {
     private final CompiledRenderPipeline[] pipelines = new CompiledRenderPipeline[4];
     private List<CompletableFuture<CompiledRenderPipeline.Pending>> compiling;
     private int mode;
+    private boolean unavailable;
 
     public void cycle() {
         mode = (mode + 1) % MODES.length;
         LOGGER.info("Terrain surface debug {} (F7)", MODES[mode]);
     }
 
+    /** Return from diagnostics to the unlit material view. */
     public void disable() {
         mode = 0;
     }
@@ -53,9 +55,7 @@ public final class TerrainSurfaceDebug implements AutoCloseable {
         if (compiling != null && compiling.stream().allMatch(CompletableFuture::isDone)) {
             finishCompilation();
         }
-        if (mode == 0) {
-            releasePipelines();
-        } else if (compiling == null && pipelines[0] == null) {
+        if (!unavailable && compiling == null && pipelines[0] == null) {
             compiling = new ArrayList<>(4);
             for (int index = 0; index < 4; index++) {
                 compiling.add(RenderSystem.getDevice().compilePipeline(description(index), new SlangShaderSource(HOST_BINDINGS), Util.backgroundExecutor()));
@@ -64,7 +64,7 @@ public final class TerrainSurfaceDebug implements AutoCloseable {
     }
 
     public boolean bind(RenderPass pass, ChunkSectionLayer layer, boolean multidraw) {
-        if (mode == 0 || !ready() || layer.translucent()) {
+        if (!ready() || layer.translucent()) {
             return false;
         }
         int index = (multidraw ? 2 : 0) + (layer == ChunkSectionLayer.CUTOUT ? 1 : 0);
@@ -121,9 +121,9 @@ public final class TerrainSurfaceDebug implements AutoCloseable {
             }
         }
         if (failed) {
-            mode = 0;
+            unavailable = true;
             releasePipelines();
-            LOGGER.error("Terrain surface debug unavailable; keeping host terrain rendering");
+            LOGGER.error("Terrain surface debug unavailable; falling back to host lighting with material colors");
         } else {
             LOGGER.info("Terrain surface debug pipelines ready (single and multidraw, solid and cutout)");
         }

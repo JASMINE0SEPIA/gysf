@@ -1,8 +1,8 @@
 package me.jasmine.gysf.integration.minecraft;
 
-import me.jasmine.gysf.debug.TerrainSurfaceDebug;
+import me.jasmine.gysf.render.terrain.TerrainSurfaceRenderer;
 
-/** Narrow access to the debug resources owned by this GameRenderer. */
+/** Narrow access to terrain rendering and its diagnostics, owned by this GameRenderer. */
 public interface SurfaceDebugAccess {
-    TerrainSurfaceDebug gysf$surfaceDebug();
+    TerrainSurfaceRenderer gysf$surfaceDebug();
 }

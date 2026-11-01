@@ -3,7 +3,7 @@ package me.jasmine.gysf.integration.mixin;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.llamalad7.mixinextras.sugar.Local;
 import me.jasmine.gysf.debug.WorldDepthDebug;
-import me.jasmine.gysf.debug.TerrainSurfaceDebug;
+import me.jasmine.gysf.render.terrain.TerrainSurfaceRenderer;
 import me.jasmine.gysf.integration.minecraft.SurfaceDebugAccess;
 import me.jasmine.gysf.integration.minecraft.GpuDiagnostics;
 import net.minecraft.client.renderer.GameRenderer;
@@ -22,10 +22,10 @@ public abstract class GameRendererMixin implements SurfaceDebugAccess {
     @Unique private boolean gysf$frameReported;
     @Unique private boolean gysf$worldReported;
     @Unique private final WorldDepthDebug gysf$depthDebug = new WorldDepthDebug();
-    @Unique private final TerrainSurfaceDebug gysf$surfaceDebug = new TerrainSurfaceDebug();
+    @Unique private final TerrainSurfaceRenderer gysf$surfaceDebug = new TerrainSurfaceRenderer();
 
     @Override
-    public TerrainSurfaceDebug gysf$surfaceDebug() {
+    public TerrainSurfaceRenderer gysf$surfaceDebug() {
         return gysf$surfaceDebug;
     }
 

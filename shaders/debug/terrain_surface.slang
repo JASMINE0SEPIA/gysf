@@ -26,7 +26,7 @@ struct SurfaceVertex
     float4 position : SV_Position;
     [[vk::location(0)]] float3 sectionPosition : TEXCOORD0;
     [[vk::location(1)]] float2 uv : TEXCOORD1;
-    [[vk::location(2)]] float4 bakedColor : COLOR0;
+    [[vk::location(2)]] float4 materialTint : COLOR0;
 };
 
 [shader("vertex")]
@@ -50,7 +50,7 @@ SurfaceVertex vertexMain(
     output.position = mul(Projection.ProjMat, mul(TerrainUniform.ModelViewMat, float4(cameraRelative, 1.0)));
     output.sectionPosition = Position;
     output.uv = UV0;
-    output.bakedColor = Color;
+    output.materialTint = Color;
     return output;
 }
 
@@ -73,9 +73,10 @@ float4 fragmentMain(SurfaceVertex input, bool front : SV_IsFrontFace) : SV_Targe
     float fade = 1.0 - smoothstep(0.35, 1.0, max(footprint.x, footprint.y));
 
     if (texel.a < preview.alphaCutoff) discard;
+    if (preview.mode == 0) return float4(texel.rgb * input.materialTint.rgb, 1.0);
     if (preview.mode == 1) return float4(texel.rgb, 1.0); // Raw atlas color, without baked tint/AO or lightmap.
     if (preview.mode == 2) return float4(normal * 0.5 + 0.5, 1.0);
-    if (preview.mode == 5) return float4(input.bakedColor.rgb, 1.0); // Explicitly includes host tint and shading.
+    if (preview.mode == 5) return float4(input.materialTint.rgb, 1.0); // Functional material color only; no biome tint, AO or directional shade.
 
     // Section origins are multiples of 16 blocks, so both grids have identical phase in every section.
     // No camera position, texture UV or quantized depth participates in grid placement.
