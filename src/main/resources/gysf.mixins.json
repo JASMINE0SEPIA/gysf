@@ -9,7 +9,11 @@
     "KeyboardHandlerMixin",
     "TerrainDrawMixin",
     "SectionMaterialMixin",
-    "FluidMaterialMixin"
+    "FluidMaterialMixin",
+    "EntityShadowMixin",
+    "ItemMaterialMixin",
+    "MovingBlockMaterialMixin",
+    "BlockDisplayMaterialMixin"
   ],
   "injectors": {
     "defaultRequire": 1

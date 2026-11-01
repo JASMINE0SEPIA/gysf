@@ -6,7 +6,6 @@ import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.client.renderer.block.BlockQuadOutput;
 import net.minecraft.client.resources.model.geometry.BakedQuad;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 /** One reusable adapter per section build. RGB means material tint, never host lighting. */
@@ -44,10 +43,7 @@ public final class TerrainMaterialOutput implements BlockQuadOutput {
             cachedIndex = index;
             cachedColor = -1;
             // Vanilla's state-dependent colors. Decorative biome and fixed vegetation tints are neutral.
-            boolean functional = state.is(Blocks.REDSTONE_WIRE) || state.is(Blocks.MELON_STEM)
-                || state.is(Blocks.PUMPKIN_STEM) || state.is(Blocks.ATTACHED_MELON_STEM)
-                || state.is(Blocks.ATTACHED_PUMPKIN_STEM);
-            if (index >= 0 && functional) {
+            if (index >= 0 && MaterialTintRules.functional(state)) {
                 var source = colors.getTintSource(state, index);
                 if (source != null) cachedColor = source.colorInWorld(state, level, pos);
             }
