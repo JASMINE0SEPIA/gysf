@@ -1,0 +1,21 @@
+{
+  "required": true,
+  "package": "me.jasmine.gysf.integration.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "VulkanBackendMixin",
+    "GameRendererMixin",
+    "PipelineBuilderMixin",
+    "KeyboardHandlerMixin",
+    "TerrainDrawMixin",
+    "SectionMaterialMixin",
+    "FluidMaterialMixin",
+    "EntityShadowMixin",
+    "ItemMaterialMixin",
+    "MovingBlockMaterialMixin",
+    "BlockDisplayMaterialMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

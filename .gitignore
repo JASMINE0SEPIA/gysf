@@ -1,3 +1,7 @@
 /AGENT.md
 /docs
 playground*/
+/.gradle/
+/build/
+/run/
+/bin/

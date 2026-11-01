@@ -1,0 +1,88 @@
+plugins {
+    id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+group = project.maven_group
+version = project.mod_version
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(25)
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 25
+    options.encoding = 'UTF-8'
+}
+
+def generatedShaders = layout.buildDirectory.dir('generated/shaders')
+def slangCompiler = providers.gradleProperty('slangcPath').orElse(
+    providers.environmentVariable('VULKAN_SDK').map { "${it}/Bin/slangc.exe" }
+).orElse('slangc')
+
+def shaderJobs = [
+    [name: 'DepthVertex', source: 'world_depth', output: 'world_depth.vert', stage: 'vertex', entry: 'vertexMain'],
+    [name: 'DepthFragment', source: 'world_depth', output: 'world_depth.frag', stage: 'fragment', entry: 'fragmentMain'],
+    [name: 'SurfaceVertex', source: 'terrain_surface', output: 'surface_single.vert', stage: 'vertex', entry: 'vertexMain', defines: ['MULTIDRAW=0']],
+    [name: 'SurfaceMultidrawVertex', source: 'terrain_surface', output: 'surface_multi.vert', stage: 'vertex', entry: 'vertexMain', defines: ['MULTIDRAW=1']],
+    [name: 'SurfaceFragment', source: 'terrain_surface', output: 'terrain_surface.frag', stage: 'fragment', entry: 'fragmentMain']
+]
+shaderJobs.each { job ->
+    def output = generatedShaders.map { it.file("assets/gysf/shaders/debug/${job.output}.spv") }
+    tasks.register("compile${job.name}", Exec) {
+        inputs.file("shaders/debug/${job.source}.slang")
+        inputs.property('slangCompiler', slangCompiler)
+        inputs.property('shaderJob', job)
+        outputs.file(output)
+        executable slangCompiler.get()
+        args file("shaders/debug/${job.source}.slang").absolutePath,
+            '-entry', job.entry, '-stage', job.stage, '-target', 'spirv', '-profile', 'spirv_1_5',
+            '-matrix-layout-column-major', '-o', output.get().asFile.absolutePath
+        (job.defines ?: []).each { define -> args '-D', define }
+        doFirst { output.get().asFile.parentFile.mkdirs() }
+    }
+}
+
+sourceSets.main.resources.srcDir(files(generatedShaders).builtBy(shaderJobs.collect { "compile${it.name}" }))
+
+processResources {
+    inputs.property 'version', project.version
+    inputs.property 'minecraft_version', project.minecraft_version
+    inputs.property 'loader_version', project.loader_version
+    filesMatching('fabric.mod.json') {
+        expand inputs.properties
+    }
+}
+
+loom {
+    runs {
+        client {
+            client()
+            runDir 'run'
+            vmArg '--enable-native-access=ALL-UNNAMED'
+            vmArg "-Dgysf.debug.gpuProbe=${providers.gradleProperty('gpuProbe').getOrElse('false')}"
+            vmArg "-Dgysf.gpu.localRayQuery=${providers.gradleProperty('localRayQuery').getOrElse('true')}"
+            programArgs '--offlineDeveloperMode', '--graphicsBackend', 'VULKAN'
+            if (providers.gradleProperty('gpuValidation').getOrElse('false').toBoolean()) {
+                programArgs '--vulkanValidation'
+            }
+            def devWorld = providers.gradleProperty('devWorld')
+            if (devWorld.isPresent()) {
+                programArgs '--quickPlaySingleplayer', devWorld.get()
+            }
+        }
+    }
+}
