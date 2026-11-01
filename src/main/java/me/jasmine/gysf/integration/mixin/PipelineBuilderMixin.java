@@ -12,6 +12,7 @@ import com.mojang.renderpearl.frontend.shaders.PipelineBuilder;
 import com.mojang.renderpearl.util.ShaderCompileException;
 import me.jasmine.gysf.gpu.SlangShaderSource;
 import me.jasmine.gysf.render.terrain.TransparentTerrainShaders;
+import me.jasmine.gysf.render.entity.ObjectMaterialShaders;
 import net.minecraft.client.renderer.ShaderDefines;
 import net.minecraft.resources.Identifier;
 import org.spongepowered.asm.mixin.Mixin;
@@ -33,6 +34,10 @@ public abstract class PipelineBuilderMixin {
         }
         if (TransparentTerrainShaders.handles(pipeline)) {
             return original.call(compiler, "gysf:core/terrain_translucent", TransparentTerrainShaders.load(type), type, defines, source);
+        }
+        String objectSource = ObjectMaterialShaders.source(pipeline, type);
+        if (objectSource != null) {
+            return original.call(compiler, "gysf:core/object_material", objectSource, type, defines, source);
         }
         return original.call(compiler, name, text, type, defines, source);
     }
