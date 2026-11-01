@@ -9,7 +9,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
-/** One reusable adapter per section build. Only solid/cutout output changes its color meaning. */
+/** One reusable adapter per section build. RGB means material tint, never host lighting. */
 public final class TerrainMaterialOutput implements BlockQuadOutput {
     private final QuadInstance material = new QuadInstance();
     private BlockQuadOutput output;
@@ -39,10 +39,6 @@ public final class TerrainMaterialOutput implements BlockQuadOutput {
 
     @Override
     public void put(float x, float y, float z, BakedQuad quad, QuadInstance shaded) {
-        if (quad.materialInfo().layer().translucent()) {
-            output.put(x, y, z, quad, shaded);
-            return;
-        }
         int index = quad.materialInfo().tintIndex();
         if (cachedIndex != index) {
             cachedIndex = index;
